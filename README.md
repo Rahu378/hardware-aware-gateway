@@ -7,7 +7,8 @@ custom **Metal** kernels.
 The premise is that transformer decoding is not a compute problem. At batch
 size one the arithmetic finishes long before the weights arrive, and the GPU
 spends most of its life waiting on memory. So the work here is not "make the
-maths faster" — it is finding where bytes move that did not need to move, and
+maths faster" 
+it is finding where bytes move that did not need to move, and
 removing those trips.
 
 Same operations, same fusion strategy, two backends. The interesting result is
