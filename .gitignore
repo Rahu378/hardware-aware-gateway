@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Profiler captures are large binaries; commit only the ones you reference.
+profiles/*
+!profiles/.gitkeep
+
+.DS_Store

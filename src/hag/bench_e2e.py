@@ -1,0 +1,215 @@
+"""End-to-end benchmark: tokens/sec and memory footprint on a real model.
+
+Op-level speedups are the interesting engineering; this is the number that
+decides whether any of it mattered. A 2x win on a kernel that occupies 4% of
+the forward pass moves the headline by 2%, and saying so plainly is worth more
+than a chart that hides it.
+
+    python -m hag.bench_e2e --model Qwen/Qwen2.5-0.5B          # fits an 8 GB Mac
+    python -m hag.bench_e2e --model meta-llama/Meta-Llama-3-8B # needs a real GPU
+
+Prefill and decode are timed separately, because they are different machines:
+prefill is compute-bound and batched, decode is memory-bound and serial. A
+kernel change usually moves exactly one of them.
+"""
+
+from __future__ import annotations
+
+import argparse
+import gc
+import json
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+from . import devices
+
+
+def _peak_memory_bytes(backend: str) -> int:
+    if backend == "cuda":
+        import torch
+
+        return torch.cuda.max_memory_allocated()
+    if backend == "mps":
+        import torch
+
+        return torch.mps.current_allocated_memory()
+    import resource
+
+    # ru_maxrss is bytes on macOS, kilobytes on Linux.
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    import sys
+
+    return rss if sys.platform == "darwin" else rss * 1024
+
+
+def _reset_peak_memory(backend: str) -> None:
+    if backend == "cuda":
+        import torch
+
+        torch.cuda.reset_peak_memory_stats()
+
+
+def patch_model(model, backend: str) -> list[str]:
+    """Swap the fused kernels into a HuggingFace Llama-family model in place.
+
+    Returns the list of modules actually patched, so the report can state what
+    was and was not replaced rather than implying whole-model coverage.
+    """
+    if backend != "cuda":
+        return []
+
+    import torch
+
+    from .kernels.triton import rmsnorm as tri_rmsnorm
+    from .kernels.triton import swiglu as tri_swiglu
+
+    patched: list[str] = []
+
+    for module in model.modules():
+        cls = type(module).__name__
+
+        if cls.endswith("RMSNorm") and hasattr(module, "weight"):
+            eps = getattr(module, "variance_epsilon", getattr(module, "eps", 1e-6))
+
+            def rms_forward(self, hidden_states, _eps=eps):
+                return tri_rmsnorm.rmsnorm(hidden_states, self.weight, _eps)
+
+            module.forward = rms_forward.__get__(module, type(module))
+            patched.append(f"{cls}.forward -> triton.rmsnorm")
+
+        elif cls.endswith("MLP") and all(
+            hasattr(module, p) for p in ("gate_proj", "up_proj", "down_proj")
+        ):
+
+            def mlp_forward(self, x):
+                return self.down_proj(tri_swiglu.swiglu(self.gate_proj(x), self.up_proj(x)))
+
+            module.forward = mlp_forward.__get__(module, type(module))
+            patched.append(f"{cls}.forward -> triton.swiglu")
+
+    del torch
+    return patched
+
+
+def run_once(model, tokenizer, backend: str, prompt_tokens: int, new_tokens: int) -> dict:
+    import torch
+
+    _reset_peak_memory(backend)
+    device = "cuda" if backend == "cuda" else ("mps" if backend == "mps" else "cpu")
+
+    input_ids = torch.randint(
+        0, tokenizer.vocab_size, (1, prompt_tokens), device=device, dtype=torch.long
+    )
+
+    def sync():
+        if backend == "cuda":
+            torch.cuda.synchronize()
+        elif backend == "mps":
+            torch.mps.synchronize()
+
+    with torch.inference_mode():
+        # Warm up: the first call pays kernel autotuning and lazy allocation.
+        model(input_ids[:, :8])
+        sync()
+
+        t0 = time.perf_counter()
+        out = model(input_ids, use_cache=True)
+        sync()
+        prefill_s = time.perf_counter() - t0
+
+        past = out.past_key_values
+        next_tok = out.logits[:, -1:].argmax(dim=-1)
+
+        t0 = time.perf_counter()
+        for _ in range(new_tokens):
+            step = model(next_tok, past_key_values=past, use_cache=True)
+            past = step.past_key_values
+            next_tok = step.logits[:, -1:].argmax(dim=-1)
+        sync()
+        decode_s = time.perf_counter() - t0
+
+    return {
+        "prefill_tokens": prompt_tokens,
+        "prefill_s": round(prefill_s, 5),
+        "prefill_tok_per_s": round(prompt_tokens / prefill_s, 1),
+        "decode_tokens": new_tokens,
+        "decode_s": round(decode_s, 5),
+        "decode_tok_per_s": round(new_tokens / decode_s, 2),
+        "ms_per_output_token": round(decode_s / new_tokens * 1e3, 3),
+        "peak_memory_gb": round(_peak_memory_bytes(backend) / 1e9, 3),
+    }
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--model", default="Qwen/Qwen2.5-0.5B")
+    ap.add_argument("--prompt-tokens", type=int, default=512)
+    ap.add_argument("--new-tokens", type=int, default=128)
+    ap.add_argument("--dtype", default="fp16", choices=["fp16", "bf16", "fp32"])
+    ap.add_argument("--out", default=None)
+    args = ap.parse_args()
+
+    try:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+    except ImportError as exc:
+        raise SystemExit(
+            "The end-to-end benchmark needs transformers:\n"
+            "    pip install -r requirements-e2e.txt"
+        ) from exc
+
+    backend = devices.default_backend()
+    device = "cuda" if backend == "cuda" else ("mps" if backend == "mps" else "cpu")
+    dt = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[args.dtype]
+
+    info = devices.describe(backend)
+    print(f"device : {info['device_name']}  [{backend}]")
+    print(f"model  : {args.model} ({args.dtype})")
+
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    model = AutoModelForCausalLM.from_pretrained(args.model, dtype=dt).to(device).eval()
+
+    baseline = run_once(model, tokenizer, backend, args.prompt_tokens, args.new_tokens)
+    print(f"baseline: {baseline['decode_tok_per_s']:.2f} tok/s decode, "
+          f"{baseline['peak_memory_gb']:.2f} GB peak")
+
+    patched_modules = patch_model(model, backend)
+    gc.collect()
+
+    if patched_modules:
+        fused = run_once(model, tokenizer, backend, args.prompt_tokens, args.new_tokens)
+        print(f"fused   : {fused['decode_tok_per_s']:.2f} tok/s decode, "
+              f"{fused['peak_memory_gb']:.2f} GB peak")
+        speedup = fused["decode_tok_per_s"] / baseline["decode_tok_per_s"]
+        print(f"decode speedup: {speedup:.3f}x")
+    else:
+        fused = None
+        speedup = None
+        print(
+            "\nNo fused kernels applied: the Triton kernels are CUDA-only, so on this\n"
+            "device the run above is the unmodified baseline. It is still recorded --\n"
+            "it is the edge-hardware reference point the cross-platform comparison needs."
+        )
+
+    payload = {
+        "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "model": args.model,
+        "dtype": args.dtype,
+        "device": info,
+        "patched_modules": sorted(set(patched_modules)),
+        "baseline": baseline,
+        "fused": fused,
+        "decode_speedup": None if speedup is None else round(speedup, 4),
+    }
+
+    slug = info["device_name"].lower().replace(" ", "-")
+    model_slug = args.model.split("/")[-1].lower()
+    out = Path(args.out or f"results/e2e_{model_slug}_{slug}.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload, indent=2) + "\n")
+    print(f"\nwrote {out}")
+
+
+if __name__ == "__main__":
+    main()
