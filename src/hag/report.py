@@ -119,7 +119,7 @@ def _headline(runs: list[dict]) -> str:
             )
             if best is None or cand[0] > best[0]:
                 best = cand
-    return "" if best is None else f"Best measured result -- {best[1]}.\n"
+    return "" if best is None else f"Best measured result: {best[1]}.\n"
 
 
 def render(runs: list[dict]) -> str:

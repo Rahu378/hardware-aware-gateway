@@ -10,10 +10,10 @@ files, so a claim in the README always has a run behind it.
 Shapes are chosen to straddle the two regimes that behave completely
 differently:
 
-* `rows = 1..8`   -- decode. One token at a time, latency-bound, and the GPU
-                     spends most of its life waiting on memory.
-* `rows = 512+`   -- prefill. Enough parallelism to actually saturate the
-                     memory system.
+* `rows = 1..8`   decode. One token at a time, latency-bound, and the GPU
+                  spends most of its life waiting on memory.
+* `rows = 512+`   prefill. Enough parallelism to actually saturate the
+                  memory system.
 
 A kernel that wins in one regime and not the other is the normal outcome, not
 a failure, and the report keeps them separate for that reason.
@@ -30,7 +30,7 @@ from pathlib import Path
 
 from . import devices, microbench, reference, timing
 
-#: (hidden_size, label) -- covers Llama-3.2-1B, Qwen2.5-1.5B, Llama-3-8B.
+#: (hidden_size, label) for Llama-3.2-1B, Qwen2.5-1.5B, Llama-3-8B.
 HIDDEN_SIZES = [(2048, "1B"), (1536, "1.5B"), (4096, "8B")]
 #: SwiGLU intermediate widths for the same three models.
 INTERMEDIATE_SIZES = [(8192, "1B"), (8960, "1.5B"), (14336, "8B")]

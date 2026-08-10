@@ -1,7 +1,7 @@
 """Fused SwiGLU as a custom Metal kernel, via MLX.
 
 The Apple-silicon counterpart to `hag.kernels.triton.swiglu`. Same arithmetic,
-same fusion, a different memory system underneath -- which is the entire point
+same fusion, a different memory system underneath, which is the entire point
 of carrying both backends in one repo.
 
 Note the asymmetry the two platforms create. On a discrete GPU the win comes

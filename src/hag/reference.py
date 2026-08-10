@@ -2,8 +2,8 @@
 
 These are the baselines every custom kernel is checked against, both for
 numerical agreement and for speed. They are written the way the operation
-appears in a stock Llama-family forward pass -- eager, unfused, one torch op at
-a time -- because that is what the custom kernel is actually replacing.
+appears in a stock Llama-family forward pass: eager, unfused, one torch op at
+a time, because that is what the custom kernel is actually replacing.
 """
 
 from __future__ import annotations
@@ -34,8 +34,8 @@ def rmsnorm_residual(
     """The real decoder-block pattern: add the residual, then normalise.
 
     Returns `(normed, new_residual)`. The new residual is the *pre-norm* sum,
-    which the block needs again after the attention/MLP sublayer -- which is
-    why fusing these two ops saves a full round trip of the hidden state rather
+    which the block needs again after the attention/MLP sublayer. That is why
+    fusing these two ops saves a full round trip of the hidden state rather
     than just a kernel launch.
     """
     h = x + residual

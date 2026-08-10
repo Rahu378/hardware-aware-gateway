@@ -25,7 +25,8 @@ error only shows up as slightly worse generations, not as a crash.
 Two denominators are reported, because they answer different questions.
 
 **Percent of datasheet.** The vendor's published bandwidth figure. Useful for
-comparing across hardware, useless as a target -- no real kernel reaches it.
+comparing across hardware, useless as a target, since no real kernel reaches
+it.
 
 **Percent of measured copy bandwidth.** A large device-to-device copy, sized
 past any last-level cache, timed on the same machine in the same process
@@ -36,7 +37,7 @@ remaining 10% is wasted effort.
 
 The numerator is **ideal traffic, not measured traffic**: the minimum number of
 bytes the operation must move given its inputs and outputs. For fused
-residual-add + RMSNorm that is read `x`, read `residual`, write `h`, write `y` --
+residual-add + RMSNorm that is read `x`, read `residual`, write `h`, write `y`:
 four arrays. Reporting against ideal traffic means the metric answers "how
 close is this to the best possible implementation", which is the question worth
 asking. It also means a kernel cannot flatter itself by moving extra bytes
@@ -72,8 +73,8 @@ To actually resolve decode-regime kernel cost you need one of:
   the launches are already amortised across layers (`hag.bench_e2e`);
 - GPU counters via `ncu` on CUDA, or Xcode Instruments' Metal System Trace on
   Apple silicon, which time the kernel on the device rather than on the host;
-- CUDA graphs, which remove per-launch submission cost entirely -- the right
-  fix in production, and out of scope here.
+- CUDA graphs, which remove per-launch submission cost entirely. That is the
+  right fix in production, and out of scope here.
 
 ## Prefill and decode are different machines
 
@@ -108,7 +109,7 @@ randomly-sampled test still passes.
   results.
 - The end-to-end patcher replaces RMSNorm and the MLP activation. It does not
   touch attention, so end-to-end gains are bounded by the fraction of the
-  forward pass those two occupy -- which is exactly what the profile in step 2
+  forward pass those two occupy, which is exactly what the profile in step 2
   is for.
 - MLX has no end-to-end path here yet; the Apple-silicon numbers are op-level
   plus an unpatched baseline.

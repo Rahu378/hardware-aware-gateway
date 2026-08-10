@@ -8,8 +8,8 @@ The op being replaced is the top of every Llama-family decoder block:
 Eager PyTorch runs that as four separate kernels and materialises `h` to DRAM
 before reading it straight back. Fusing collapses it to a single pass: read `x`,
 read `residual`, write `h`, write `y`. That is 4 arrays of traffic against the
-7-ish the unfused chain moves, and at decode time -- when the GPU is idle
-waiting on memory, not on maths -- traffic is the only thing that matters.
+7-ish the unfused chain moves. At decode time, when the GPU is idle waiting on
+memory rather than on maths, traffic is the only thing that matters.
 
 Forward only. This is an inference project; there is no backward pass to write.
 """
@@ -106,8 +106,8 @@ def _rmsnorm_plain(
 
     Exists as a separate kernel rather than the fused one with a zeroed
     residual, because that trick would move an extra array of zeros through
-    DRAM to save a hundred lines of source -- the wrong trade in a kernel whose
-    entire purpose is traffic reduction. This is the drop-in replacement for
+    DRAM to save a hundred lines of source. That is the wrong trade in a kernel
+    whose entire purpose is traffic reduction. This is the drop-in replacement for
     `LlamaRMSNorm.forward` used by the end-to-end benchmark.
     """
     row = tl.program_id(0)

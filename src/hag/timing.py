@@ -51,14 +51,14 @@ def bench_ms(
     `inner_reps > 1` runs the op that many times between synchronisations and
     divides. This exists because a decode-shaped launch (one row, a few
     kilobytes) finishes far faster than a command buffer can be submitted and
-    waited on -- roughly 0.2 ms on Apple silicon. Timed one-at-a-time, every
+    waited on, roughly 0.2 ms on Apple silicon. Timed one-at-a-time, every
     such kernel reports the same number and the measurement says nothing about
     the kernel. Amortising the submission is the only way to see the work.
 
     The tradeoff is real and worth stating: with `inner_reps > 1` the input
     stays resident in cache across replicates, so the result is a warm-cache
-    figure. For decode that is arguably the honest case anyway -- the hidden
-    state was written by the previous layer microseconds earlier -- but it is
+    figure. For decode that is arguably the honest case anyway, since the hidden
+    state was written by the previous layer microseconds earlier, but it is
     not comparable to the cold-cache prefill numbers, and the reports keep the
     two regimes in separate tables because of it.
     """

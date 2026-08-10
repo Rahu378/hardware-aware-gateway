@@ -54,7 +54,7 @@ def dispatch_floor_ms(backend: str) -> float:
 
     This is the cost of submitting a command buffer and waiting on it, with
     essentially no work attached. Any measured kernel time near this figure is
-    reporting the runtime's launch path, not the kernel -- which is exactly the
+    reporting the runtime's launch path, not the kernel. That is exactly the
     situation at decode, where a single row of hidden state is a few kilobytes
     and the arithmetic is over before the submission has finished.
 

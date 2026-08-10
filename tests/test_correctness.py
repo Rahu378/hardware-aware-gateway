@@ -2,7 +2,7 @@
 
 A kernel that is fast and wrong is worth nothing, so this suite runs before any
 benchmark in the Makefile. Each backend is skipped rather than failed when the
-hardware is absent -- the same file runs on a Mac, on a CUDA box, and in CI
+hardware is absent, so the same file runs on a Mac, on a CUDA box, and in CI
 with no GPU at all.
 
 Tolerances are set per dtype against the *reference*, not against an exact

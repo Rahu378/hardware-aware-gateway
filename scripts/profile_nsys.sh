@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Capture an Nsight Systems timeline of the end-to-end benchmark.
 #
-# This is step 2 of the project -- find the traffic jam before writing a kernel.
+# This is step 2 of the project: find the traffic jam before writing a kernel.
 # Run it BEFORE touching any kernel code, keep the report, and run it again
 # after. The pair of traces is the evidence; the kernel is just the fix.
 #
 #   ./scripts/profile_nsys.sh Qwen/Qwen2.5-1.5B
 #
-# nsys works fine inside Colab and Kaggle notebooks via `!` -- it is `ncu`
+# nsys works fine inside Colab and Kaggle notebooks via `!`. It is `ncu`
 # (scripts/profile_ncu.sh) that needs a VM with performance-counter access.
 # Download the .nsys-rep and open it in the Nsight Systems GUI, which has a
 # macOS host build.

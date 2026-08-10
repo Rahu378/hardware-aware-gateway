@@ -46,5 +46,5 @@ echo "Wrote ${OUT_DIR}/kernels_${STAMP}.ncu-rep"
 echo
 echo "The number that matters is 'Memory Throughput [%]' in Speed of Light."
 echo "For a memory-bound kernel it should approach 100%. If it does not, the"
-echo "kernel is leaving bandwidth on the table -- check for uncoalesced access"
+echo "kernel is leaving bandwidth on the table. Check for uncoalesced access"
 echo "in Memory Workload Analysis before blaming occupancy."

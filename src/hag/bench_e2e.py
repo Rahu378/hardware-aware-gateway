@@ -113,7 +113,7 @@ def run_once(model, tokenizer, backend: str, prompt_tokens: int, new_tokens: int
         # worse than none here: `_swiglu_fwd` is autotuned and keyed on element
         # count, so a warmup at a different sequence length leaves the real
         # prefill to pay for the autotuning sweep inside the timed region.
-        # Decode is warmed separately for the same reason -- its element count
+        # Decode is warmed separately for the same reason: its element count
         # differs from prefill's, and so is a separate autotune key.
         warm = model(input_ids, use_cache=True)
         model(
