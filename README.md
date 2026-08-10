@@ -31,23 +31,24 @@ Two fused kernels, in Triton and in Metal. On Tesla T4 they reach **6.25x** over
 
 | device | backend | datasheet BW | measured copy BW | % of datasheet | dispatch floor |
 | --- | --- | --- | --- | --- | --- |
-| Apple M3 | mlx | 100 GB/s | 78 GB/s | 78% | 177 us |
+| Apple M3 | mlx | 100 GB/s | 81 GB/s | 81% | 179 us |
 | Tesla T4 | cuda | 320 GB/s | 241 GB/s | 75% | 6 us |
 
 ### Prefill regime (batched, memory system saturated)
 
 | device | op | shape (rows x width) | baseline | fused | speedup | eff. BW | % of datasheet | vs copy |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Apple M3 | `rmsnorm_residual` | 2048 x 2048 | 2.527 ms | 0.701 ms | **3.61x** | 48 GB/s | 48% | 62% |
-| Apple M3 | `rmsnorm_residual` | 2048 x 1536 | 1.962 ms | 0.586 ms | **3.35x** | 43 GB/s | 43% | 55% |
-| Apple M3 | `rmsnorm_residual` | 512 x 4096 | 1.474 ms | 0.466 ms | **3.16x** | 36 GB/s | 36% | 46% |
-| Apple M3 | `rmsnorm_residual` | 2048 x 4096 | 5.026 ms | 1.084 ms | **4.64x** | 62 GB/s | 62% | 80% |
-| Apple M3 | `swiglu` | 512 x 8192 | 0.959 ms | 0.505 ms | **1.90x** | 50 GB/s | 50% | 64% |
-| Apple M3 | `swiglu` | 2048 x 8192 | 3.692 ms | 1.447 ms | **2.55x** | 70 GB/s | 70% | 90% |
-| Apple M3 | `swiglu` | 512 x 8960 | 1.054 ms | 0.541 ms | **1.95x** | 51 GB/s | 51% | 66% |
-| Apple M3 | `swiglu` | 2048 x 8960 | 3.971 ms | 1.553 ms | **2.56x** | 71 GB/s | 71% | 91% |
-| Apple M3 | `swiglu` | 512 x 14336 | 1.551 ms | 0.770 ms | **2.01x** | 57 GB/s | 57% | 74% |
-| Apple M3 | `swiglu` | 2048 x 14336 | 5.850 ms | 2.360 ms | **2.48x** | 75 GB/s | 75% | 96% |
+| Apple M3 | `rmsnorm_residual` | 2048 x 2048 | 2.504 ms | 0.771 ms | **3.25x** | 44 GB/s | 44% | 54% |
+| Apple M3 | `rmsnorm_residual` | 512 x 1536 | 0.570 ms | 0.522 ms | **1.09x** | 12 GB/s | 12% | 15% |
+| Apple M3 | `rmsnorm_residual` | 2048 x 1536 | 2.068 ms | 0.595 ms | **3.48x** | 42 GB/s | 42% | 52% |
+| Apple M3 | `rmsnorm_residual` | 512 x 4096 | 1.348 ms | 0.417 ms | **3.23x** | 40 GB/s | 40% | 50% |
+| Apple M3 | `rmsnorm_residual` | 2048 x 4096 | 4.594 ms | 1.058 ms | **4.34x** | 63 GB/s | 63% | 78% |
+| Apple M3 | `swiglu` | 512 x 8192 | 0.981 ms | 0.504 ms | **1.95x** | 50 GB/s | 50% | 61% |
+| Apple M3 | `swiglu` | 2048 x 8192 | 3.167 ms | 1.382 ms | **2.29x** | 73 GB/s | 73% | 90% |
+| Apple M3 | `swiglu` | 512 x 8960 | 1.055 ms | 0.525 ms | **2.01x** | 52 GB/s | 52% | 64% |
+| Apple M3 | `swiglu` | 2048 x 8960 | 3.474 ms | 1.491 ms | **2.33x** | 74 GB/s | 74% | 91% |
+| Apple M3 | `swiglu` | 512 x 14336 | 1.545 ms | 0.694 ms | **2.23x** | 64 GB/s | 64% | 78% |
+| Apple M3 | `swiglu` | 2048 x 14336 | 5.381 ms | 2.217 ms | **2.43x** | 80 GB/s | 80% | 98% |
 | Tesla T4 | `rmsnorm_residual` | 512 x 2048 | 0.243 ms | 0.039 ms | **6.25x** | 216 GB/s | 67% | 89% |
 | Tesla T4 | `rmsnorm_residual` | 2048 x 2048 | 0.839 ms | 0.148 ms | **5.66x** | 226 GB/s | 71% | 94% |
 | Tesla T4 | `rmsnorm_residual` | 512 x 1536 | 0.172 ms | 0.031 ms | **5.59x** | 205 GB/s | 64% | 85% |
@@ -65,6 +66,7 @@ Two fused kernels, in Triton and in Metal. On Tesla T4 they reach **6.25x** over
 
 | device | op | shape (rows x width) | baseline | fused | speedup | eff. BW | % of datasheet | vs copy |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Apple M3 | `rmsnorm_residual` | 1 x 1536 | 0.475 ms | 0.378 ms | **1.26x** | 0 GB/s | 0% | 0% |
 | Tesla T4 | `rmsnorm_residual` | 1 x 2048 | 0.103 ms | 0.050 ms | **2.08x** | 0 GB/s | 0% | 0% |
 | Tesla T4 | `rmsnorm_residual` | 8 x 2048 | 0.105 ms | 0.052 ms | **2.02x** | 2 GB/s | 1% | 1% |
 | Tesla T4 | `rmsnorm_residual` | 1 x 1536 | 0.106 ms | 0.077 ms | **1.38x** | 0 GB/s | 0% | 0% |
@@ -80,6 +82,13 @@ Two fused kernels, in Triton and in Metal. On Tesla T4 they reach **6.25x** over
 
 
 **Where fusion loses.** 6 measured shapes came out slower than eager, all of them `swiglu` at decode widths. Worst case 0.29x on Tesla T4 at 1x14336. One fused launch replaces three eager ones, but at a single row the traffic saved is a few kilobytes while Triton's launch path costs more than the three ATen launches it replaces. Fusion is a bandwidth optimisation, and at decode the kernel is not bandwidth-bound.
+
+
+**Measured crossover**, the smallest row count at which fusing wins and keeps winning, dispatch-bound shapes excluded:
+
+- Apple M3: `rmsnorm_residual` from 1 row, `swiglu` from 512 rows
+
+This is what sets `SWIGLU_MIN_ROWS` in the Triton kernel, which routes to eager below the threshold so the prefill win survives without the decode penalty. `rmsnorm_residual` is not gated, because it wins at every row count measured.
 
 ### Where the GPU time goes
 
@@ -111,7 +120,7 @@ The kernels are not wrong. The target was. The next move is to dispatch to eager
 **On the `vs copy` column reading above 100%.** The reference is a device-to-device copy, which moves one read per write. `swiglu` moves two reads per write, and DRAM sustains reads better than writes, so a 2:1 kernel legitimately exceeds a 1:1 copy. The copy figure is a reference point, not a ceiling. `% of datasheet` is the honest wall, and nothing here passes it.
 
 
-14 measurements landed within 2x of a launch floor and are excluded above: 14 on Apple M3 (launch floor 177 us). At those shapes the number describes the runtime's submission path rather than the kernel. Note how much of the decode regime this costs on Apple silicon and how little on the T4; a 30x difference in dispatch cost decides which optimisations are even coherent on a platform. See [docs/METHOD.md](docs/METHOD.md).
+30 measurements landed within 2x of a launch floor and are excluded above: 30 on Apple M3 (launch floor 179 us). At those shapes the number describes the runtime's submission path rather than the kernel. Note how much of the decode regime this costs on Apple silicon and how little on the T4; a 30x difference in dispatch cost decides which optimisations are even coherent on a platform. See [docs/METHOD.md](docs/METHOD.md).
 
 <!-- BENCH:END -->
 

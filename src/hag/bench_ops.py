@@ -34,7 +34,10 @@ from . import devices, microbench, reference, timing
 HIDDEN_SIZES = [(2048, "1B"), (1536, "1.5B"), (4096, "8B")]
 #: SwiGLU intermediate widths for the same three models.
 INTERMEDIATE_SIZES = [(8192, "1B"), (8960, "1.5B"), (14336, "8B")]
-ROW_COUNTS = [1, 8, 512, 2048]
+#: 1 and 8 are decode. 512 and 2048 are prefill. The middle values exist to
+#: locate the crossover where fusing swiglu starts paying, which is what sets
+#: `SWIGLU_MIN_ROWS` rather than a guess.
+ROW_COUNTS = [1, 8, 32, 64, 128, 512, 2048]
 
 
 #: Decode-shaped launches finish faster than a command buffer can be submitted,
@@ -107,8 +110,12 @@ def _run_cuda(dtype_name: str, warmup: int, iters: int) -> list[dict]:
             base = timing.bench_ms(
                 lambda g=g, u=u: reference.swiglu(g, u), "cuda", warmup, iters, inner_reps=reps
             )
+            # The raw kernel, not the dispatching wrapper. Routing through the
+            # wrapper below SWIGLU_MIN_ROWS would benchmark eager against eager
+            # and report a meaningless 1.00x.
             fused = timing.bench_ms(
-                lambda g=g, u=u: tri_swiglu.swiglu(g, u), "cuda", warmup, iters, inner_reps=reps
+                lambda g=g, u=u: tri_swiglu.swiglu_triton(g, u),
+                "cuda", warmup, iters, inner_reps=reps,
             )
             rows_out.append(
                 _record(
@@ -195,6 +202,29 @@ def _run_mlx(dtype_name: str, warmup: int, iters: int) -> list[dict]:
     return rows_out
 
 
+def _crossover(rows: list[dict]) -> dict[str, int | None]:
+    """Smallest row count at which each op's fused kernel beats eager.
+
+    Reported so `SWIGLU_MIN_ROWS` can be set from a measurement instead of
+    taste, and so it can be re-derived on hardware with a different launch cost.
+
+    Dispatch-bound shapes are excluded. Including them would let a launch-cost
+    artifact set a kernel threshold, and on Apple silicon that is most of the
+    range: a 177 us floor swallows every shape below roughly 512 rows, so the
+    honest answer there is "not resolvable", not a number.
+    """
+    usable = [r for r in rows if not r.get("dispatch_bound")]
+    out: dict[str, int | None] = {}
+    for op in sorted({r["op"] for r in rows}):
+        wins = sorted(
+            {r["rows"] for r in usable if r["op"] == op and r["speedup"] >= 1.0}
+        )
+        losses = {r["rows"] for r in usable if r["op"] == op and r["speedup"] < 1.0}
+        # The first winning row count with no larger loss above it.
+        out[op] = next((w for w in wins if not any(x > w for x in losses)), None)
+    return out
+
+
 def _record(op, model, m, n, dtype_name, base, fused, ideal_bytes) -> dict:
     return {
         "op": op,
@@ -266,7 +296,9 @@ def main() -> None:
                 100 * r["fused_gbs"] / spec["peak_bandwidth_gbs"], 1
             )
 
+    crossover = _crossover(rows)
     payload = {
+        "crossover_rows": crossover,
         "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "git_rev": _git_rev(),
         "python": platform.python_version(),
@@ -297,6 +329,9 @@ def main() -> None:
             f"{r['fused_pct_of_measured_peak']:>6.0f}%"
             f"{'  <- dispatch-bound' if r['dispatch_bound'] else ''}"
         )
+    print("\ncrossover (smallest row count where fusing wins, and keeps winning):")
+    for op, rows_at in crossover.items():
+        print(f"  {op:<20}{rows_at if rows_at is not None else 'never in this sweep'}")
     print(f"\nwrote {out}")
 
 

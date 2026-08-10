@@ -83,10 +83,16 @@ def patch_model(model, backend: str) -> list[str]:
         ):
 
             def mlp_forward(self, x):
+                # The dispatching entry point, not the raw kernel: below
+                # SWIGLU_MIN_ROWS this falls back to eager, which is what keeps
+                # the prefill win without paying the decode penalty.
                 return self.down_proj(tri_swiglu.swiglu(self.gate_proj(x), self.up_proj(x)))
 
             module.forward = mlp_forward.__get__(module, type(module))
-            patched.append(f"{cls}.forward -> triton.swiglu")
+            patched.append(
+                f"{cls}.forward -> triton.swiglu (fused at >= "
+                f"{tri_swiglu.SWIGLU_MIN_ROWS} rows)"
+            )
 
     del torch
     return patched

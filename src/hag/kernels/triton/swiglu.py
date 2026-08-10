@@ -46,8 +46,33 @@ def _swiglu_fwd(G, U, O, n_elements, BLOCK: tl.constexpr):
     tl.store(O + offs, out.to(O.dtype.element_ty), mask=mask)
 
 
-def swiglu(gate: torch.Tensor, up: torch.Tensor) -> torch.Tensor:
-    """Fused `silu(gate) * up`. Matches `hag.reference.swiglu`."""
+#: Below this many rows, the eager path wins and this kernel dispatches to it.
+#:
+#: Fusing is a bandwidth optimisation, and bandwidth is not the constraint at a
+#: single row. Measured on a T4: at 1 x 14336 the fused kernel takes 54 us
+#: against eager's 16 us, because Triton's launch path costs more than the three
+#: ATen launches it replaces while the traffic saved is a few kilobytes. At
+#: 512 x 14336 the same kernel is 1.74x faster. The crossover sits between those
+#: two, and `hag.bench_ops` sweeps 1/8/32/64/128/512/2048 rows and reports the
+#: crossover directly, so this constant is set from a measurement rather than
+#: taste. The current value is the midpoint of the bracket the first T4 sweep
+#: established; rerun the sweep on new hardware and read `crossover_rows` from
+#: the JSON before trusting it there.
+#:
+#: Note this threshold is specific to `swiglu`. `rmsnorm_residual` wins at every
+#: row count measured, including 1, because it removes a whole round trip of the
+#: hidden state rather than one intermediate, so it is not gated.
+SWIGLU_MIN_ROWS = 64
+
+
+def swiglu_triton(gate: torch.Tensor, up: torch.Tensor) -> torch.Tensor:
+    """The fused kernel, unconditionally. Matches `hag.reference.swiglu`.
+
+    Benchmarks call this directly so the sweep keeps reporting the kernel's real
+    cost at every shape, including the shapes where it loses. Routing the
+    benchmark through the dispatcher below would quietly replace those rows with
+    measurements of eager against itself.
+    """
     assert gate.shape == up.shape, "gate and up must be the same shape"
     assert gate.is_cuda, "Triton kernels require a CUDA device"
 
@@ -62,3 +87,18 @@ def swiglu(gate: torch.Tensor, up: torch.Tensor) -> torch.Tensor:
     grid = lambda meta: (triton.cdiv(n, meta["BLOCK"]),)  # noqa: E731
     _swiglu_fwd[grid](gate, up, out, n)
     return out
+
+
+def swiglu(gate: torch.Tensor, up: torch.Tensor) -> torch.Tensor:
+    """`silu(gate) * up`, fused when fusing is worth it.
+
+    This is the entry point the model patcher uses. Both paths compute the same
+    function to within a rounding of the final store; the choice is purely about
+    which is faster at this shape.
+    """
+    rows = gate.numel() // gate.shape[-1] if gate.ndim else 0
+    if rows < SWIGLU_MIN_ROWS:
+        from ... import reference
+
+        return reference.swiglu(gate, up)
+    return swiglu_triton(gate, up)

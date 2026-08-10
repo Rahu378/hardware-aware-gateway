@@ -74,9 +74,49 @@ def test_triton_swiglu(dtype_name, shape):
     u = torch.randn(m, n, dtype=dt, device="cuda")
 
     torch.testing.assert_close(
-        tri.swiglu(g, u), reference.swiglu(g, u),
+        tri.swiglu_triton(g, u), reference.swiglu(g, u),
         atol=_tol(dtype_name), rtol=_tol(dtype_name),
     )
+
+
+@requires_cuda
+@pytest.mark.parametrize("rows", [1, 8, 63, 64, 512])
+def test_triton_swiglu_dispatcher_matches_reference(rows):
+    """The dispatcher must be transparent: same answer either side of the threshold."""
+    import torch
+
+    from hag import reference
+    from hag.kernels.triton import swiglu as tri
+
+    g = torch.randn(rows, 8960, dtype=torch.float16, device="cuda")
+    u = torch.randn(rows, 8960, dtype=torch.float16, device="cuda")
+    torch.testing.assert_close(tri.swiglu(g, u), reference.swiglu(g, u), atol=2e-2, rtol=2e-2)
+
+
+@requires_cuda
+def test_triton_swiglu_dispatcher_routes_on_row_count():
+    """Below the threshold it must actually take the eager path, not just agree.
+
+    Asserting only on numerical agreement would pass even if the threshold were
+    ignored, since both paths compute the same function.
+    """
+    import torch
+
+    from hag.kernels.triton import swiglu as tri
+
+    calls = []
+    original = tri.swiglu_triton
+    tri.swiglu_triton = lambda g, u: calls.append(1) or original(g, u)
+    try:
+        below = torch.randn(tri.SWIGLU_MIN_ROWS - 1, 512, dtype=torch.float16, device="cuda")
+        tri.swiglu(below, below)
+        assert not calls, "should have used the eager path below the threshold"
+
+        at = torch.randn(tri.SWIGLU_MIN_ROWS, 512, dtype=torch.float16, device="cuda")
+        tri.swiglu(at, at)
+        assert calls, "should have used the fused kernel at the threshold"
+    finally:
+        tri.swiglu_triton = original
 
 
 @requires_cuda
@@ -89,7 +129,7 @@ def test_triton_swiglu_saturating_inputs():
 
     g = torch.tensor([[-30.0, -12.0, 0.0, 12.0, 30.0]], dtype=torch.float16, device="cuda")
     u = torch.ones_like(g)
-    out = tri.swiglu(g, u)
+    out = tri.swiglu_triton(g, u)
     assert torch.isfinite(out).all()
     torch.testing.assert_close(out, reference.swiglu(g, u), atol=2e-2, rtol=2e-2)
 

@@ -273,6 +273,34 @@ def _e2e_verdict(e2e: list[dict], prof: dict | None) -> str:
     )
 
 
+def _crossover_note(runs: list[dict]) -> str:
+    """Report the measured crossover, which is what sets the dispatch threshold."""
+    lines = []
+    for run in runs:
+        cross = run.get("crossover_rows")
+        if not cross:
+            continue
+        dev = run["device"]["device_name"]
+        bits = [
+            f"`{op}` from {rows} row{'' if rows == 1 else 's'}"
+            if rows
+            else f"`{op}` never in this sweep"
+            for op, rows in sorted(cross.items())
+        ]
+        lines.append(f"- {dev}: " + ", ".join(bits))
+    if not lines:
+        return ""
+    return (
+        "\n**Measured crossover**, the smallest row count at which fusing wins and "
+        "keeps winning, dispatch-bound shapes excluded:\n\n"
+        + "\n".join(lines)
+        + "\n\nThis is what sets `SWIGLU_MIN_ROWS` in the Triton kernel, which "
+        "routes to eager below the threshold so the prefill win survives without "
+        "the decode penalty. `rmsnorm_residual` is not gated, because it wins at "
+        "every row count measured.\n"
+    )
+
+
 def _peak_caveat(runs: list[dict]) -> str:
     """Explain the column that can read above 100%, before a reader assumes an error."""
     over = [
@@ -359,6 +387,7 @@ def render(runs: list[dict], e2e: list[dict] | None = None, prof: dict | None = 
         _results_table(runs, "decode"),
         "",
         _regressions(runs),
+        _crossover_note(runs),
         "### Where the GPU time goes",
         "",
         _profile_table(prof),
