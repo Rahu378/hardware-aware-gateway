@@ -188,6 +188,8 @@ src/hag/
   bench_ops.py          op-level sweep      -> results/ops_*.json
   bench_e2e.py          tokens/sec + memory -> results/e2e_*.json
   profile_torch.py      per-kernel profile, no apt package required
+  roofline.py           is decode bandwidth-bound, compute-bound, or CPU-bound
+  graphs.py             CUDA graph capture for the decode step
   report.py             renders the tables above
   kernels/triton/       CUDA kernels
   kernels/metal/        Apple silicon kernels, via MLX
@@ -264,9 +266,10 @@ it did move, so a kernel cannot flatter itself by moving extra data quickly.
 - [x] Roofline analysis of decode, which cancelled the GEMV kernel below
 - [ ] ~~Write a GEMV kernel~~. Cancelled: cuBLAS already runs it at the memory
       wall, so there is nothing to take. See the roofline section above
-- [ ] CUDA graphs for the decode step. Decode issues about 6000 op dispatches
-      per token at roughly 3 us each, leaving the GPU idle for over half the
-      token. That is the actual bottleneck
+- [ ] CUDA graphs for the decode step. Written, not yet run on a GPU. Decode
+      issues about 6000 op dispatches per token at roughly 3 us each, leaving
+      the GPU idle for over half the token, and replay collapses the step to a
+      single submission
 - [ ] Nsight Compute counters, which need a VM with performance-counter access
 - [ ] Llama-3-8B rather than Qwen2.5-1.5B
 

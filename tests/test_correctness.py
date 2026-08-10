@@ -195,6 +195,58 @@ def test_metal_rmsnorm_rejects_bad_weight():
 
 
 # --------------------------------------------------------------------------
+# CUDA graphs
+# --------------------------------------------------------------------------
+
+
+@requires_cuda
+def test_graphed_decode_matches_static_eager():
+    """The graph must not change the output. Compared against the same cache.
+
+    Greedy decoding is deterministic, so this is an exact-match test. It is the
+    one that catches a graph replaying against a buffer nothing updated, which
+    fails by producing fluent, wrong tokens rather than by raising.
+    """
+    import torch
+
+    from hag import graphs, models
+
+    model, tokenizer = models.load_model_and_tokenizer(
+        "Qwen/Qwen2.5-0.5B", torch.float16, "cuda"
+    )
+    ids = torch.randint(
+        0, models.vocab_size(tokenizer, model), (1, 32), device="cuda", dtype=torch.long
+    )
+    result = graphs.verify(model, ids, new_tokens=8)
+    assert result["match"], (
+        f"graph diverged from static-cache eager at token "
+        f"{result['graph_first_divergence']}: "
+        f"{result['static_eager_head']} vs {result['graphed_head']}"
+    )
+
+
+@requires_cuda
+def test_graphed_decoder_rejects_use_before_capture():
+    import pytest as _pytest
+    import torch
+
+    from hag import graphs, models
+
+    model, _ = models.load_model_and_tokenizer("Qwen/Qwen2.5-0.5B", torch.float16, "cuda")
+    decoder = graphs.GraphedDecoder(model, max_cache_len=64)
+    with _pytest.raises(RuntimeError, match="capture"):
+        decoder.decode_step(torch.zeros((1, 1), dtype=torch.long, device="cuda"))
+
+
+def test_graphs_module_imports_without_cuda():
+    """Importing must work anywhere; only construction needs a GPU."""
+    from hag import graphs
+
+    assert hasattr(graphs, "GraphedDecoder")
+    assert hasattr(graphs, "verify")
+
+
+# --------------------------------------------------------------------------
 # Backend-independent
 # --------------------------------------------------------------------------
 

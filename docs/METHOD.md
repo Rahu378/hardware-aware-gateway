@@ -144,6 +144,26 @@ and offered a download, so the run looked complete and produced nothing.
 The lesson generalises past this repo. A pipeline step that can fail without
 failing the pipeline is worse than no step at all.
 
+## Verifying a CUDA graph
+
+A graph fails in a way no other optimisation here does: silently, and with
+plausible output. If replay runs against a buffer nothing updated, decoding
+continues and produces fluent, wrong tokens. Nothing raises.
+
+So `hag.graphs.verify` compares token ids, not logits, and it makes two
+comparisons rather than one:
+
+- **graphed against static-cache eager** must match exactly. Same cache, same
+  kernels, the only difference is replay. Greedy decoding is deterministic, so
+  any divergence is a bug. This is the pass/fail.
+- **static-cache eager against dynamic-cache eager** is informational. A padded
+  static cache changes the shapes attention sees, SDPA can select different
+  kernels, and a token can flip on a near-tie in the argmax. That is not the
+  graph's fault, and folding it into the pass/fail would make the check cry
+  wolf on a correct graph.
+
+The benchmark refuses to report a speedup until the first comparison passes.
+
 ## Known limits
 
 - Forward pass only. There is no backward; this is an inference project.
@@ -156,3 +176,6 @@ failing the pipeline is worse than no step at all.
   is for.
 - MLX has no end-to-end path here yet; the Apple-silicon numbers are op-level
   plus an unpatched baseline.
+- CUDA graphs have no Apple silicon counterpart in this repo. Metal exposes no
+  comparable capture API through MLX, so that comparison stops at the NVIDIA
+  side rather than spanning both.
