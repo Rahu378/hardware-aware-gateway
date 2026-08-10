@@ -16,12 +16,31 @@
 #   !bash scripts/colab_run.sh
 # or from a clean runtime with nothing checked out yet:
 #   !curl -sL https://raw.githubusercontent.com/Rahu378/hardware-aware-gateway/main/scripts/colab_run.sh | bash
+#
+# Works on Kaggle too, which is worth knowing: its free GPU quota is separate
+# from Colab's, so exhausting one still leaves the other. Enable Settings >
+# Internet in the Kaggle notebook first, or the clone and the model download
+# both fail.
 
 set -euo pipefail
 
 REPO_URL="https://github.com/Rahu378/hardware-aware-gateway.git"
-WORK="${HAG_WORK:-/content/hag-run}"
 MODEL="${HAG_MODEL:-Qwen/Qwen2.5-1.5B}"
+
+# Colab writes to /content, Kaggle to /kaggle/working, and anything else gets
+# the home directory. Kaggle matters because its free GPU quota is separate from
+# Colab's, so hitting the limit on one does not block the other.
+if [ -n "${HAG_WORK:-}" ]; then
+    BASE="$(dirname "$HAG_WORK")"; WORK="$HAG_WORK"
+elif [ -d /content ]; then
+    BASE=/content; WORK=/content/hag-run
+elif [ -d /kaggle/working ]; then
+    BASE=/kaggle/working; WORK=/kaggle/working/hag-run
+else
+    BASE="$HOME"; WORK="$HOME/hag-run"
+fi
+ARCHIVE="$BASE/artifacts.zip"
+echo "workdir: $WORK"
 
 # Check for a GPU before doing anything else. Without this the script clones,
 # installs, silently skips all fifty GPU tests, and only fails two minutes later
@@ -33,7 +52,8 @@ if ! python -c "import torch, sys; sys.exit(0 if torch.cuda.is_available() else 
     echo "########################################################################"
     echo "#  No CUDA device.                                                     #"
     echo "#                                                                      #"
-    echo "#  In Colab:  Runtime > Change runtime type > T4 GPU > Save            #"
+    echo "#  Colab:   Runtime > Change runtime type > T4 GPU > Save              #"
+    echo "#  Kaggle:  Settings > Accelerator > GPU T4, and Internet on            #"
     echo "#  Then run this cell again.                                           #"
     echo "#                                                                      #"
     echo "#  A CPU runtime skips every GPU test and measures nothing, so this    #"
@@ -98,9 +118,9 @@ python -m hag.report
 echo
 echo "=== results written ==="
 ls -la "$WORK/results"
-cd "$WORK" && zip -qr /content/artifacts.zip results profiles
+cd "$WORK" && zip -qr "$ARCHIVE" results profiles
 echo
-echo "Archive: /content/artifacts.zip"
+echo "Archive: $ARCHIVE"
 if [ "$GRAPHS_OK" = "1" ]; then
     echo "Every step succeeded."
 else
