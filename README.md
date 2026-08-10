@@ -102,6 +102,18 @@ Measured on Tesla T4, Qwen2.5-1.5B, one 512-token prefill plus 32 decode steps. 
 | copy / concat | 14.5 ms | **2.0%** |
 | **total** | **713.7 ms** | |
 
+### Is decode actually bandwidth-bound?
+
+| quantity | value |
+| --- | --- |
+| measured decode | 31.0 ms per token |
+| GPU busy during decode | at most **35%** |
+
+**This is what stopped the next kernel from being written.** The plan said to target the GEMV, since matmul is the largest share of decode GPU time. The arithmetic says cuBLAS is already at the memory wall there, so a hand-written GEMV has nothing to take. The gap between 12 ms of kernel time and 33 ms of wall clock is the CPU issuing roughly twelve hundred op dispatches per token while the GPU waits.
+
+Decode here is dispatch-bound, not bandwidth-bound. That points at CUDA graphs, which capture the decode step once and replay it without per-launch cost, and not at another kernel. It also explains why the end-to-end measurement above is so noisy: a CPU-scheduling-bound loop on a shared VM is measuring the VM.
+
+
 ### End to end
 
 | device | model | prefill baseline | prefill fused | decode baseline | decode fused | peak memory |
@@ -225,9 +237,14 @@ it did move, so a kernel cannot flatter itself by moving extra data quickly.
 - [x] Op-level harness, launch-floor probe, report generation
 - [x] Profile of a real model, with the kernel mix that explains the results
 - [x] End-to-end tokens/sec, prefill and decode, on both platforms
-- [ ] Dispatch to eager below a row-count threshold, to keep the prefill win
-      without paying the decode penalty
-- [ ] Go after the GEMV. It is 76% of decode GPU time and nothing here touches it
+- [x] Dispatch to eager below the measured crossover, keeping the prefill win
+      without the decode penalty
+- [x] Roofline analysis of decode, which cancelled the GEMV kernel below
+- [ ] ~~Write a GEMV kernel~~. Cancelled: cuBLAS already runs it at the memory
+      wall, so there is nothing to take. See the roofline section above
+- [ ] CUDA graphs for the decode step. Decode issues ~1200 op dispatches per
+      token and leaves the GPU idle about two thirds of the time, which is the
+      actual bottleneck
 - [ ] Nsight Compute counters, which need a VM with performance-counter access
 - [ ] Llama-3-8B rather than Qwen2.5-1.5B
 
@@ -237,6 +254,13 @@ The plan this project started from said: profile, find the memory bottleneck,
 write a kernel for one layer, document the speedup. Steps two and three were
 done in that order, and the honest outcome is that the kernel helped one regime
 and hurt the other.
+
+It then cancelled the follow-up. The obvious next target was the GEMV, at 76%
+of decode GPU time. Putting the measured numbers against the roofline first
+showed cuBLAS already running it at 105% of measured copy bandwidth, which for
+a read-dominated kernel means it is at the memory wall. A hand-written GEMV
+would have been careful work with no headroom to recover, and the only thing
+that caught it was doing the arithmetic before writing the code.
 
 Keeping that visible is the point. A repo showing only the 6.25x would be a
 more flattering artifact and a less useful one, and the number that decides

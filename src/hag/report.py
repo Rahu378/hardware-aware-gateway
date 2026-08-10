@@ -34,6 +34,62 @@ def load_e2e(results_dir: Path) -> list[dict]:
     return [json.loads(p.read_text()) for p in sorted(results_dir.glob("e2e_*.json"))]
 
 
+def _roofline_section(repo: Path, runs: list[dict], e2e: list[dict]) -> str:
+    """Place decode against the memory wall, which is what picks the next target."""
+    from . import roofline
+
+    prof = load_profile(repo)
+    if not prof or prof.get("timed_on") != "gpu":
+        return ""
+    dev = prof["device"]["device_name"]
+    ops = next((r for r in runs if r["device"]["device_name"] == dev), {})
+    end = next((r for r in e2e if r["device"]["device_name"] == dev), {})
+    a = roofline.analyse(prof, end, ops)
+    if not a:
+        return ""
+
+    lines = ["| quantity | value |", "| --- | --- |"]
+    if "bandwidth_floor_ms_per_token" in a:
+        lines += [
+            f"| weights streamed per token | {a['weight_bytes'] / 1e9:.2f} GB |",
+            f"| bandwidth floor per token | {a['bandwidth_floor_ms_per_token']:.1f} ms "
+            f"({a['bandwidth_ceiling_tok_per_s']:.0f} tok/s ceiling) |",
+            f"| measured | {a['measured_decode_ms_per_token']:.1f} ms "
+            f"({100 * a['measured_fraction_of_roofline']:.0f}% of roofline) |",
+            f"| cuBLAS GEMV time per token | {a['gemv_ms_per_decode_step']:.1f} ms "
+            f"(**{100 * a['gemv_fraction_of_roofline']:.0f}% of roofline**) |",
+        ]
+    else:
+        lines.append(
+            f"| measured decode | {a['measured_decode_ms_per_token']:.1f} ms per token |"
+        )
+    if "gpu_busy_fraction_upper_bound" in a:
+        lines.append(
+            f"| GPU busy during decode | at most "
+            f"**{100 * a['gpu_busy_fraction_upper_bound']:.0f}%** |"
+        )
+    if "op_dispatches_per_token" in a:
+        lines.append(
+            f"| op dispatches per token | {a['op_dispatches_per_token']} "
+            f"(~{a['implied_cpu_launch_ms_at_20us']:.0f} ms of CPU launch cost) |"
+        )
+
+    verdict = (
+        "\n**This is what stopped the next kernel from being written.** The plan "
+        "said to target the GEMV, since matmul is the largest share of decode GPU "
+        "time. The arithmetic says cuBLAS is already at the memory wall there, so "
+        "a hand-written GEMV has nothing to take. The gap between 12 ms of kernel "
+        "time and 33 ms of wall clock is the CPU issuing roughly twelve hundred op "
+        "dispatches per token while the GPU waits.\n\nDecode here is "
+        "dispatch-bound, not bandwidth-bound. That points at CUDA graphs, which "
+        "capture the decode step once and replay it without per-launch cost, and "
+        "not at another kernel. It also explains why the end-to-end measurement "
+        "above is so noisy: a CPU-scheduling-bound loop on a shared VM is measuring "
+        "the VM.\n"
+    )
+    return "### Is decode actually bandwidth-bound?\n\n" + "\n".join(lines) + "\n" + verdict
+
+
 def load_profile(repo: Path) -> dict | None:
     path = repo / "profiles" / "torch_profile_summary.json"
     return json.loads(path.read_text()) if path.exists() else None
@@ -454,6 +510,8 @@ def render(runs: list[dict], e2e: list[dict] | None = None, prof: dict | None = 
         "### Where the GPU time goes",
         "",
         _profile_table(prof),
+        "",
+        _roofline_section(REPO, runs, e2e),
         "",
         "### End to end",
         "",

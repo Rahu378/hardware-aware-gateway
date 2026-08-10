@@ -144,11 +144,20 @@ def profile_model(model, input_ids, backend: str, new_tokens: int, out_dir: Path
     for e in events:
         e["pct_of_self_time"] = round(100 * e["self_us"] / total, 2)
 
+    # Op dispatches per forward pass. Each one costs CPU time whether or not
+    # the GPU has anything to do, which is the whole question at decode.
+    forwards = new_tokens + 1  # one prefill plus one per decode step
+    dispatches = sum(
+        int(e.count) for e in prof.key_averages() if e.key.startswith("aten::")
+    )
+
     return {
         "timed_on": "gpu" if has_device_time else "cpu",
         "trace": str(trace),
         "regime_us": ranges,
         "kernel_self_us_total": round(total, 1),
+        "decode_steps": new_tokens,
+        "dispatches_per_forward": round(dispatches / forwards),
         "top_kernels": events[:40],
     }
 

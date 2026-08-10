@@ -259,6 +259,12 @@ def main() -> None:
     print(f"model  : {args.model} ({args.dtype})")
 
     model, tokenizer = models.load_model_and_tokenizer(args.model, dt, device)
+
+    # Decode streams essentially every weight once per token, so this is the
+    # numerator of the bandwidth roofline in `hag.roofline`.
+    weight_bytes = sum(p.numel() * p.element_size() for p in model.parameters())
+    print(f"weights: {weight_bytes / 1e9:.2f} GB")
+
     unpatched = {m: m.forward for m in model.modules()}
 
     patched_modules = patch_model(model, backend)
@@ -348,6 +354,7 @@ def main() -> None:
         "device": info,
         "patched_modules": sorted(set(patched_modules)),
         "repeats": args.repeats,
+        "weight_bytes": weight_bytes,
         "baseline_samples": [s["decode_tok_per_s"] for s in base_samples],
         "fused_samples": [s["decode_tok_per_s"] for s in fused_samples],
         "baseline": baseline,
