@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hardware-aware-gateway"
+version = "0.1.0"
+description = "Profile-driven kernel optimisation for LLM inference, on CUDA via Triton and Apple silicon via Metal"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Rahul Reddy Ch" }]
+dependencies = ["torch>=2.4", "numpy>=1.24"]
+
+[project.optional-dependencies]
+# Model weights and the HF stack, only needed for the end-to-end benchmark.
+e2e = ["transformers>=4.44", "accelerate>=0.33", "sentencepiece>=0.2"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.urls]
+Repository = "https://github.com/Rahu378/hardware-aware-gateway"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Installing the package is what makes `python -m hag.<module>` work from any
+# process. Relying on sys.path manipulation inside a notebook does not survive
+# the jump to a `!` subprocess, which is exactly how the first Colab run
+# managed to report success while executing nothing.

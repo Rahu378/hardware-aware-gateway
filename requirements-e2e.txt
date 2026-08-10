@@ -1,5 +1,0 @@
-# Only needed for `make bench-e2e`, which downloads model weights.
--r requirements.txt
-transformers>=4.44
-accelerate>=0.33
-sentencepiece>=0.2

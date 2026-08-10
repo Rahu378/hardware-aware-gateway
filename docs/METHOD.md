@@ -10,8 +10,10 @@ The sequence matters, and it is deliberately not "write a fast kernel, then
 find a benchmark that flatters it":
 
 1. Benchmark the unmodified model end-to-end. Record tokens/sec and peak memory.
-2. Profile it (`scripts/profile_nsys.sh`). Read the kernel summary. Identify
-   where time actually goes.
+2. Profile it (`python -m hag.profile_torch`). Read the kernel summary.
+   Identify where time actually goes. `scripts/profile_nsys.sh` gives a richer
+   timeline when `nsys` is installed, but the torch profiler needs no apt
+   package and answers the same question, so it is the default.
 3. Only then pick a target and write a kernel.
 4. Prove the kernel is numerically correct (`make test`) before timing it once.
 5. Re-benchmark, re-profile, and record both numbers.
@@ -100,6 +102,18 @@ kernel is wrong, not that the test is strict.
 The saturating-input test exists because it is the specific case where a
 plausible-looking fp16 sigmoid diverges from the reference while every
 randomly-sampled test still passes.
+
+## Reproducibility
+
+The package is installed (`pip install -e .`) rather than reached through
+`sys.path`. Every benchmark shells out as `python -m hag.<module>`, and a
+`sys.path` entry set inside a notebook process does not exist in that
+subprocess. The first Colab run of this repo failed exactly there: four cells
+raised `ModuleNotFoundError` while the notebook still reached its final cell
+and offered a download, so the run looked complete and produced nothing.
+
+The lesson generalises past this repo. A pipeline step that can fail without
+failing the pipeline is worse than no step at all.
 
 ## Known limits
 

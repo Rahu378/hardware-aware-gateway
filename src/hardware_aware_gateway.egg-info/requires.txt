@@ -1,0 +1,11 @@
+torch>=2.4
+numpy>=1.24
+
+[dev]
+pytest>=8.0
+ruff>=0.6
+
+[e2e]
+transformers>=4.44
+accelerate>=0.33
+sentencepiece>=0.2

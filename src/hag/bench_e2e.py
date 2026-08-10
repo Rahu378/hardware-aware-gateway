@@ -22,7 +22,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import devices
+from . import devices, models
 
 
 def _peak_memory_bytes(backend: str) -> int:
@@ -99,7 +99,8 @@ def run_once(model, tokenizer, backend: str, prompt_tokens: int, new_tokens: int
     device = "cuda" if backend == "cuda" else ("mps" if backend == "mps" else "cpu")
 
     input_ids = torch.randint(
-        0, tokenizer.vocab_size, (1, prompt_tokens), device=device, dtype=torch.long
+        0, models.vocab_size(tokenizer, model), (1, prompt_tokens),
+        device=device, dtype=torch.long,
     )
 
     def sync():
@@ -163,12 +164,8 @@ def main() -> None:
 
     try:
         import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
     except ImportError as exc:
-        raise SystemExit(
-            "The end-to-end benchmark needs transformers:\n"
-            "    pip install -r requirements-e2e.txt"
-        ) from exc
+        raise SystemExit("Needs torch:  pip install -e '.[e2e]'") from exc
 
     backend = devices.default_backend()
     device = "cuda" if backend == "cuda" else ("mps" if backend == "mps" else "cpu")
@@ -178,8 +175,7 @@ def main() -> None:
     print(f"device : {info['device_name']}  [{backend}]")
     print(f"model  : {args.model} ({args.dtype})")
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model)
-    model = AutoModelForCausalLM.from_pretrained(args.model, dtype=dt).to(device).eval()
+    model, tokenizer = models.load_model_and_tokenizer(args.model, dt, device)
 
     baseline = run_once(model, tokenizer, backend, args.prompt_tokens, args.new_tokens)
     print(f"baseline: {baseline['decode_tok_per_s']:.2f} tok/s decode, "
@@ -199,8 +195,8 @@ def main() -> None:
         speedup = None
         print(
             "\nNo fused kernels applied: the Triton kernels are CUDA-only, so on this\n"
-            "device the run above is the unmodified baseline. It is still recorded --\n"
-            "it is the edge-hardware reference point the cross-platform comparison needs."
+            "device the run above is the unmodified baseline. It is still recorded,\n"
+            "as the edge-hardware reference point the cross-platform comparison needs."
         )
 
     payload = {

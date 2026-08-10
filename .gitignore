@@ -4,7 +4,9 @@ __pycache__/
 .pytest_cache/
 
 # Profiler captures are large binaries; commit only the ones you reference.
+# The JSON summary is small and worth keeping, the chrome trace is not.
 profiles/*
 !profiles/.gitkeep
+!profiles/*_summary.json
 
 .DS_Store

@@ -3,12 +3,12 @@
 PY := .venv/bin/python
 PIP := .venv/bin/pip
 
-.PHONY: setup test bench bench-e2e report report-check profile clean
+.PHONY: setup test bench bench-e2e report report-check profile profile-nsys clean
 
 setup:                ## create the venv and install everything
 	python3 -m venv .venv
 	$(PIP) install --upgrade pip
-	$(PIP) install -r requirements.txt
+	$(PIP) install -e '.[e2e,dev]' 
 
 test:                 ## numerical correctness; skips absent backends
 	$(PY) -m pytest
@@ -25,7 +25,10 @@ report:               ## regenerate the README tables from results/
 report-check:         ## fail if the README has drifted from results/
 	$(PY) -m hag.report --check
 
-profile:              ## Nsight Systems timeline (CUDA only)
+profile:              ## per-kernel profile; needs no apt package
+	$(PY) -m hag.profile_torch --model $(or $(MODEL),Qwen/Qwen2.5-0.5B)
+
+profile-nsys:         ## Nsight Systems timeline (CUDA, needs nsys installed)
 	./scripts/profile_nsys.sh $(or $(MODEL),Qwen/Qwen2.5-1.5B)
 
 clean:

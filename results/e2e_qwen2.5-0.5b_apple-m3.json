@@ -1,0 +1,30 @@
+{
+  "generated_utc": "2026-08-10T00:31:26+00:00",
+  "model": "Qwen/Qwen2.5-0.5B",
+  "dtype": "fp32",
+  "device": {
+    "backend": "mps",
+    "device_name": "Apple M3",
+    "spec": {
+      "name": "Apple M3",
+      "peak_bandwidth_gbs": 100.0,
+      "peak_tflops_fp16": 4.1,
+      "memory_gb": 8.0,
+      "source": "Apple M3 press specs (LPDDR5-6400, 128-bit)"
+    },
+    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O"
+  },
+  "patched_modules": [],
+  "baseline": {
+    "prefill_tokens": 128,
+    "prefill_s": 0.10189,
+    "prefill_tok_per_s": 1256.3,
+    "decode_tokens": 16,
+    "decode_s": 0.6117,
+    "decode_tok_per_s": 26.16,
+    "ms_per_output_token": 38.231,
+    "peak_memory_gb": 2.077
+  },
+  "fused": null,
+  "decode_speedup": null
+}
