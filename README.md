@@ -30,18 +30,31 @@ Best measured result: `rmsnorm_residual` at 2048x4096 on Apple M3: **4.64x** ove
 
 ### Prefill regime (batched, memory system saturated)
 
-| device | op | shape (rows x width) | baseline | fused | speedup | eff. BW | % of measured peak |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Apple M3 | `rmsnorm_residual` | 2048 x 2048 | 2.527 ms | 0.701 ms | **3.61x** | 48 GB/s | 62% |
-| Apple M3 | `rmsnorm_residual` | 2048 x 1536 | 1.962 ms | 0.586 ms | **3.35x** | 43 GB/s | 55% |
-| Apple M3 | `rmsnorm_residual` | 512 x 4096 | 1.474 ms | 0.466 ms | **3.16x** | 36 GB/s | 46% |
-| Apple M3 | `rmsnorm_residual` | 2048 x 4096 | 5.026 ms | 1.084 ms | **4.64x** | 62 GB/s | 80% |
-| Apple M3 | `swiglu` | 512 x 8192 | 0.959 ms | 0.505 ms | **1.90x** | 50 GB/s | 64% |
-| Apple M3 | `swiglu` | 2048 x 8192 | 3.692 ms | 1.447 ms | **2.55x** | 70 GB/s | 90% |
-| Apple M3 | `swiglu` | 512 x 8960 | 1.054 ms | 0.541 ms | **1.95x** | 51 GB/s | 66% |
-| Apple M3 | `swiglu` | 2048 x 8960 | 3.971 ms | 1.553 ms | **2.56x** | 71 GB/s | 91% |
-| Apple M3 | `swiglu` | 512 x 14336 | 1.551 ms | 0.770 ms | **2.01x** | 57 GB/s | 74% |
-| Apple M3 | `swiglu` | 2048 x 14336 | 5.850 ms | 2.360 ms | **2.48x** | 75 GB/s | 96% |
+| device | op | shape (rows x width) | baseline | fused | speedup | eff. BW | % of datasheet | vs copy |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Apple M3 | `rmsnorm_residual` | 2048 x 2048 | 2.527 ms | 0.701 ms | **3.61x** | 48 GB/s | 48% | 62% |
+| Apple M3 | `rmsnorm_residual` | 2048 x 1536 | 1.962 ms | 0.586 ms | **3.35x** | 43 GB/s | 43% | 55% |
+| Apple M3 | `rmsnorm_residual` | 512 x 4096 | 1.474 ms | 0.466 ms | **3.16x** | 36 GB/s | 36% | 46% |
+| Apple M3 | `rmsnorm_residual` | 2048 x 4096 | 5.026 ms | 1.084 ms | **4.64x** | 62 GB/s | 62% | 80% |
+| Apple M3 | `swiglu` | 512 x 8192 | 0.959 ms | 0.505 ms | **1.90x** | 50 GB/s | 50% | 64% |
+| Apple M3 | `swiglu` | 2048 x 8192 | 3.692 ms | 1.447 ms | **2.55x** | 70 GB/s | 70% | 90% |
+| Apple M3 | `swiglu` | 512 x 8960 | 1.054 ms | 0.541 ms | **1.95x** | 51 GB/s | 51% | 66% |
+| Apple M3 | `swiglu` | 2048 x 8960 | 3.971 ms | 1.553 ms | **2.56x** | 71 GB/s | 71% | 91% |
+| Apple M3 | `swiglu` | 512 x 14336 | 1.551 ms | 0.770 ms | **2.01x** | 57 GB/s | 57% | 74% |
+| Apple M3 | `swiglu` | 2048 x 14336 | 5.850 ms | 2.360 ms | **2.48x** | 75 GB/s | 75% | 96% |
+
+### Decode regime (one row per sequence, latency-bound)
+
+_Nothing measurable in this regime. Run `make bench`._
+
+
+### End to end
+
+| device | model | baseline decode | with fused kernels | change | peak memory |
+| --- | --- | --- | --- | --- | --- |
+| Apple M3 | Qwen2.5-0.5B | 26.16 tok/s | not applicable | baseline only | 2.08 GB |
+
+
 
 
 14 measurements landed within 2x of the launch floor (Apple M3 (177 us)) and are excluded from the tables above. At those shapes the number describes the runtime's submission path, not the kernel. Decode-shaped work has to be judged end-to-end or with GPU counters; see [docs/METHOD.md](docs/METHOD.md).

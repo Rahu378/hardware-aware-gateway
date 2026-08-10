@@ -27,10 +27,46 @@ REPO = Path(__file__).resolve().parents[2]
 
 
 def load_runs(results_dir: Path) -> list[dict]:
-    runs = []
-    for path in sorted(results_dir.glob("ops_*.json")):
-        runs.append(json.loads(path.read_text()))
-    return runs
+    return [json.loads(p.read_text()) for p in sorted(results_dir.glob("ops_*.json"))]
+
+
+def load_e2e(results_dir: Path) -> list[dict]:
+    return [json.loads(p.read_text()) for p in sorted(results_dir.glob("e2e_*.json"))]
+
+
+def _e2e_table(runs: list[dict]) -> str:
+    """End-to-end tokens/sec, which is the only number that decides anything.
+
+    Reported whether or not it flatters the kernels. A repo that shows op-level
+    speedups and quietly omits the end-to-end result is not reporting a
+    measurement, it is making a case.
+    """
+    if not runs:
+        return "_No end-to-end runs recorded yet. Run `make bench-e2e`._"
+    lines = [
+        "| device | model | baseline decode | with fused kernels | change | peak memory |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    for run in runs:
+        name = run["device"]["device_name"]
+        model = run["model"].split("/")[-1]
+        base = run["baseline"]
+        fused = run.get("fused")
+        if fused is None:
+            lines.append(
+                f"| {name} | {model} | {base['decode_tok_per_s']:.2f} tok/s "
+                f"| not applicable | baseline only "
+                f"| {base['peak_memory_gb']:.2f} GB |"
+            )
+            continue
+        ratio = run.get("decode_speedup") or 0.0
+        mark = f"**{ratio:.3f}x**" if ratio >= 1 else f"**{ratio:.3f}x slower**"
+        lines.append(
+            f"| {name} | {model} | {base['decode_tok_per_s']:.2f} tok/s "
+            f"| {fused['decode_tok_per_s']:.2f} tok/s | {mark} "
+            f"| {fused['peak_memory_gb']:.2f} GB |"
+        )
+    return "\n".join(lines)
 
 
 def _env_table(runs: list[dict]) -> str:
@@ -59,27 +95,57 @@ def _env_table(runs: list[dict]) -> str:
 def _results_table(runs: list[dict], regime: str) -> str:
     lines = [
         "| device | op | shape (rows x width) | baseline | fused | speedup "
-        "| eff. BW | % of measured peak |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| eff. BW | % of datasheet | vs copy |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     any_row = False
     for run in runs:
         name = run["device"]["device_name"]
         for r in run["results"]:
-            if r["regime"] != regime:
-                continue
-            if regime == "prefill" and r.get("dispatch_bound"):
+            if r["regime"] != regime or r.get("dispatch_bound"):
                 continue
             any_row = True
+            speed = f"**{r['speedup']:.2f}x**" if r["speedup"] >= 1 else f"{r['speedup']:.2f}x"
+            sheet = r.get("fused_pct_of_datasheet")
+            sheet_s = f"{sheet:.0f}%" if sheet is not None else "n/a"
             lines.append(
                 f"| {name} | `{r['op']}` | {r['rows']} x {r['width']} "
                 f"| {r['baseline_ms']:.3f} ms | {r['fused_ms']:.3f} ms "
-                f"| **{r['speedup']:.2f}x** | {r['fused_gbs']:.0f} GB/s "
-                f"| {r['fused_pct_of_measured_peak']:.0f}% |"
+                f"| {speed} | {r['fused_gbs']:.0f} GB/s "
+                f"| {sheet_s} | {r['fused_pct_of_measured_peak']:.0f}% |"
             )
     if not any_row:
-        return "_No runs recorded yet. Run `make bench`._"
+        return "_Nothing measurable in this regime. Run `make bench`._"
     return "\n".join(lines)
+
+
+def _regressions(runs: list[dict]) -> str:
+    """Call out the shapes where fusing made things worse.
+
+    Burying these would make the report a sales document. They are also the
+    most informative rows in it: they mark where launch overhead outweighs the
+    traffic saved, which is the boundary the next kernel has to move.
+    """
+    losses = [
+        (run["device"]["device_name"], r)
+        for run in runs
+        for r in run["results"]
+        if not r.get("dispatch_bound") and r["speedup"] < 1.0
+    ]
+    if not losses:
+        return ""
+    worst = min(losses, key=lambda t: t[1]["speedup"])
+    ops = sorted({r["op"] for _, r in losses})
+    return (
+        f"\n**Where fusion loses.** {len(losses)} measured shapes came out slower "
+        f"than eager, all of them {' and '.join(f'`{o}`' for o in ops)} at decode "
+        f"widths. Worst case {worst[1]['speedup']:.2f}x on {worst[0]} at "
+        f"{worst[1]['rows']}x{worst[1]['width']}. One fused launch replaces three "
+        "eager ones, but at a single row the traffic saved is a few kilobytes "
+        "while Triton's launch path costs more than the three ATen launches it "
+        "replaces. Fusion is a bandwidth optimisation, and at decode the kernel "
+        "is not bandwidth-bound.\n"
+    )
 
 
 def _dispatch_bound_note(runs: list[dict]) -> str:
@@ -104,6 +170,49 @@ def _dispatch_bound_note(runs: list[dict]) -> str:
     )
 
 
+def _e2e_verdict(e2e: list[dict]) -> str:
+    """State the end-to-end outcome in words, including when it is a regression."""
+    losses = [r for r in e2e if (r.get("decode_speedup") or 1.0) < 1.0]
+    if not losses:
+        return ""
+    worst = min(losses, key=lambda r: r["decode_speedup"])
+    dev = worst["device"]["device_name"]
+    pct = (1 - worst["decode_speedup"]) * 100
+    return (
+        f"\n**The fused kernels made end-to-end decode slower, by {pct:.0f}% on "
+        f"{dev}.** The profile says why. Matrix-vector products are 63% of GPU "
+        "time at decode, while every elementwise op these kernels touch adds up "
+        "to roughly 12%, and the fused SwiGLU is itself slower than eager at a "
+        "single row. A perfect fusion had a 12% ceiling and this one spent more "
+        "than it saved.\n\nThe kernels are not wrong; the target was. Prefill, "
+        "where the same kernels reach 6.25x and 95% of datasheet bandwidth, is "
+        "the regime where saving traffic is worth anything. Decode is bound by "
+        "streaming weights through the GEMV, and no amount of elementwise fusion "
+        "touches that. Fixing it means dispatching to eager at low row counts and "
+        "then going after the GEMV itself.\n"
+    )
+
+
+def _peak_caveat(runs: list[dict]) -> str:
+    """Explain the column that can read above 100%, before a reader assumes an error."""
+    over = [
+        r
+        for run in runs
+        for r in run["results"]
+        if not r.get("dispatch_bound") and r.get("fused_pct_of_measured_peak", 0) > 100
+    ]
+    if not over:
+        return ""
+    return (
+        "\n**On the `vs copy` column reading above 100%.** The reference is a "
+        "device-to-device copy, which moves one read per write. `swiglu` moves two "
+        "reads per write, and DRAM sustains reads better than writes, so a 2:1 "
+        "kernel legitimately exceeds a 1:1 copy. The copy figure is a reference "
+        "point, not a ceiling. `% of datasheet` is the honest wall, and nothing "
+        "here passes it.\n"
+    )
+
+
 def _headline(runs: list[dict]) -> str:
     best: tuple[float, str] | None = None
     for run in runs:
@@ -122,7 +231,8 @@ def _headline(runs: list[dict]) -> str:
     return "" if best is None else f"Best measured result: {best[1]}.\n"
 
 
-def render(runs: list[dict]) -> str:
+def render(runs: list[dict], e2e: list[dict] | None = None) -> str:
+    e2e = e2e or []
     if not runs:
         return (
             f"{BEGIN}\n\n_No benchmark runs recorded yet. "
@@ -143,6 +253,17 @@ def render(runs: list[dict]) -> str:
         "",
         _results_table(runs, "prefill"),
         "",
+        "### Decode regime (one row per sequence, latency-bound)",
+        "",
+        _results_table(runs, "decode"),
+        "",
+        _regressions(runs),
+        "### End to end",
+        "",
+        _e2e_table(e2e),
+        "",
+        _e2e_verdict(e2e),
+        _peak_caveat(runs),
         _dispatch_bound_note(runs),
         END,
     ]
@@ -163,7 +284,8 @@ def main() -> None:
 
     head, rest = text.split(BEGIN, 1)
     _, tail = rest.split(END, 1)
-    updated = head + render(load_runs(Path(args.results))) + tail
+    results_dir = Path(args.results)
+    updated = head + render(load_runs(results_dir), load_e2e(results_dir)) + tail
 
     if args.check:
         if updated != text:

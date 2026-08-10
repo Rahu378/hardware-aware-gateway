@@ -101,13 +101,15 @@ src/hag/
   microbench.py         measured copy bandwidth + launch floor
   timing.py             synchronisation, cache flushing, amortised timing
   reference.py          PyTorch baselines and ideal-traffic accounting
+  models.py             model loading across the transformers 4.x/5.x split
   bench_ops.py          op-level sweep      -> results/ops_*.json
   bench_e2e.py          tokens/sec + memory -> results/e2e_*.json
+  profile_torch.py      per-kernel profile, no apt package required
   report.py             renders the tables above
   kernels/triton/       CUDA kernels
   kernels/metal/        Apple silicon kernels, via MLX
 scripts/
-  profile_nsys.sh       timeline capture (works in Colab)
+  profile_nsys.sh       Nsight Systems timeline (when nsys is installed)
   profile_ncu.sh        per-kernel counters (needs a VM you control)
 docs/METHOD.md          how every number was produced
 ```
@@ -115,11 +117,16 @@ docs/METHOD.md          how every number was produced
 ## Running it
 
 ```bash
-make setup
-make test
-make bench
-make report
+make setup     # venv + editable install
+make test      # correctness; skips absent backends
+make bench     # op-level sweep
+make profile   # per-kernel profile of a real model
+make report    # regenerate the tables above
 ```
+
+The package is installed rather than reached through `sys.path`, because every
+benchmark shells out as `python -m hag.<module>` and a `sys.path` entry set
+inside a notebook does not exist in that subprocess.
 
 `make test` skips whichever backend is absent, so the same suite runs on a Mac,
 on a CUDA box, and in CI with no GPU at all.
