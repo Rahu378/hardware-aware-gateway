@@ -78,6 +78,23 @@ To actually resolve decode-regime kernel cost you need one of:
 - CUDA graphs, which remove per-launch submission cost entirely. That is the
   right fix in production, and out of scope here.
 
+## Run-to-run variance on shared hardware
+
+Op-level numbers use `triton.testing.do_bench` over 100 replicates and are
+stable. The end-to-end benchmark was not, and the way that surfaced is worth
+recording.
+
+Across two runs on the same Colab T4, the *unpatched* model measured 32.24 and
+then 25.98 tokens/sec: a 20% swing with nothing changed. Measured once each in
+sequence, that drift lands entirely on whichever configuration happens to run
+second, and it is indistinguishable from a result. The first run showed the
+fused kernels 17% slower and the second showed them 23% faster.
+
+`bench_e2e` now alternates baseline and fused across `--repeats` and reports
+the median with the observed range. When the two ranges overlap the report says
+the difference is unresolved rather than printing a ratio. A speedup smaller
+than the noise floor of the machine you measured it on is not a speedup.
+
 ## Prefill and decode are different machines
 
 They are reported separately throughout because they behave nothing alike:

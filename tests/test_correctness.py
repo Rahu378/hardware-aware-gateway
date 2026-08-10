@@ -80,7 +80,7 @@ def test_triton_swiglu(dtype_name, shape):
 
 
 @requires_cuda
-@pytest.mark.parametrize("rows", [1, 8, 63, 64, 512])
+@pytest.mark.parametrize("rows", [1, 8, 31, 32, 512])
 def test_triton_swiglu_dispatcher_matches_reference(rows):
     """The dispatcher must be transparent: same answer either side of the threshold."""
     import torch

@@ -41,7 +41,7 @@ python -m hag.bench_ops --backend cuda --dtype fp16
 
 echo "=== 5/6  profile + end-to-end (${MODEL}) ==="
 python -m hag.profile_torch --model "$MODEL" --prompt-tokens 512 --new-tokens 32
-python -m hag.bench_e2e --model "$MODEL" --prompt-tokens 512 --new-tokens 128
+python -m hag.bench_e2e --model "$MODEL" --prompt-tokens 512 --new-tokens 128 --repeats 5
 
 echo "=== 6/6  report ==="
 python -m hag.report

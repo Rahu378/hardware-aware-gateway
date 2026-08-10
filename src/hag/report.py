@@ -81,6 +81,22 @@ def _profile_table(prof: dict | None) -> str:
     return "\n".join(lines)
 
 
+def _spread(section: dict, key: str) -> str:
+    st = section.get(key)
+    if not st or st.get("samples", 1) < 2:
+        return ""
+    return f" <br><sub>{st['min']:.2f} to {st['max']:.2f}, n={st['samples']}</sub>"
+
+
+def _resolved(run: dict) -> bool:
+    """False when baseline and fused ranges overlap, i.e. the difference is noise."""
+    b = run.get("baseline", {}).get("decode_tok_per_s_stats")
+    f = (run.get("fused") or {}).get("decode_tok_per_s_stats")
+    if not b or not f or b.get("samples", 1) < 2:
+        return False
+    return not (f["min"] <= b["max"] and b["min"] <= f["max"])
+
+
 def _e2e_table(runs: list[dict]) -> str:
     """End-to-end tokens/sec, which is the only number that decides anything.
 
@@ -111,8 +127,9 @@ def _e2e_table(runs: list[dict]) -> str:
         lines.append(
             f"| {name} | {model} | {base['prefill_tok_per_s']:.0f} tok/s "
             f"| {fused['prefill_tok_per_s']:.0f} tok/s (**{pre:.2f}x**) "
-            f"| {base['decode_tok_per_s']:.2f} tok/s "
-            f"| {fused['decode_tok_per_s']:.2f} tok/s (**{dec:.2f}x**) "
+            f"| {base['decode_tok_per_s']:.2f} tok/s{_spread(base, 'decode_tok_per_s_stats')} "
+            f"| {fused['decode_tok_per_s']:.2f} tok/s (**{dec:.2f}x**)"
+            f"{_spread(fused, 'decode_tok_per_s_stats')} "
             f"| {base['peak_memory_gb']:.2f} -> {fused['peak_memory_gb']:.2f} GB |"
         )
     return "\n".join(lines)
@@ -234,6 +251,26 @@ def _e2e_verdict(e2e: list[dict], prof: dict | None) -> str:
         return ""
     run = patched[0]
     base, fused = run["baseline"], run["fused"]
+    n = run.get("repeats", 1)
+    if n < 2:
+        return (
+            "\n**These end-to-end figures are single samples and should not be "
+            "read as a result.** Across two runs of this benchmark on the same "
+            "Colab T4, the *unpatched* model measured 32.24 and then 25.98 tok/s: "
+            "a 20% swing with nothing changed. Timed once each, that drift lands "
+            "entirely on whichever configuration ran second. `bench_e2e` now "
+            "alternates baseline and fused across `--repeats` and reports medians "
+            "with the observed range; rerun it to get numbers worth quoting.\n"
+        )
+    if not _resolved(run):
+        return (
+            f"\n**Not resolved.** Over {n} alternating repeats the baseline and "
+            "fused decode ranges still overlap, so the difference is smaller than "
+            "the run-to-run spread of a shared GPU. The op-level tables above are "
+            "measured with `triton.testing.do_bench` over 100 replicates and do "
+            "not have this problem; this row does. Raise `--repeats`, or measure "
+            "on a machine you are not sharing.\n"
+        )
     pre = fused["prefill_tok_per_s"] / base["prefill_tok_per_s"]
     dec = fused["decode_tok_per_s"] / base["decode_tok_per_s"]
     dev = run["device"]["device_name"]

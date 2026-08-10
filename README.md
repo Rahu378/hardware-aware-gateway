@@ -106,15 +106,11 @@ Measured on Tesla T4, Qwen2.5-1.5B, one 512-token prefill plus 32 decode steps. 
 
 | device | model | prefill baseline | prefill fused | decode baseline | decode fused | peak memory |
 | --- | --- | --- | --- | --- | --- | --- |
-| Apple M3 | Qwen2.5-0.5B | 1256 tok/s | not applicable | 26.16 tok/s | not applicable | 2.08 GB |
+| Apple M3 | Qwen2.5-0.5B | 1254 tok/s | not applicable | 30.36 tok/s | not applicable | 2.08 GB |
 | Tesla T4 | Qwen2.5-1.5B | 4215 tok/s | 5287 tok/s (**1.25x**) | 32.24 tok/s | 26.87 tok/s (**0.83x**) | 3.29 -> 3.54 GB |
 
 
-**Prefill got 1.25x faster. Decode got 1.20x slower.** On Tesla T4 the same two kernels moved prefill from 4215 to 5287 tok/s while dropping decode from 32.2 to 26.9 tok/s. The profile explains the split: matmul is 76% of GPU time and every elementwise op these kernels touch adds up to 19%, so fusion had a 19% ceiling before it started.
-
-This is the prefill/decode distinction showing up end to end rather than as theory. Prefill has thousands of rows in flight and is genuinely bandwidth-bound, so removing a round trip of the hidden state pays. Decode has one row: the traffic saved is kilobytes, the GPU is waiting on weights streaming through the GEMV, and Triton's launch path costs more than the three ATen launches it replaced. Peak memory rose too, from 3.29 to 3.54 GB, because the fused RMSNorm materialises the residual as a separate tensor.
-
-The kernels are not wrong. The target was. The next move is to dispatch to eager below a row-count threshold, which keeps the prefill win and stops paying at decode, and then to go after the GEMV, which is where the time actually is.
+**These end-to-end figures are single samples and should not be read as a result.** Across two runs of this benchmark on the same Colab T4, the *unpatched* model measured 32.24 and then 25.98 tok/s: a 20% swing with nothing changed. Timed once each, that drift lands entirely on whichever configuration ran second. `bench_e2e` now alternates baseline and fused across `--repeats` and reports medians with the observed range; rerun it to get numbers worth quoting.
 
 
 **On the `vs copy` column reading above 100%.** The reference is a device-to-device copy, which moves one read per write. `swiglu` moves two reads per write, and DRAM sustains reads better than writes, so a 2:1 kernel legitimately exceeds a 1:1 copy. The copy figure is a reference point, not a ceiling. `% of datasheet` is the honest wall, and nothing here passes it.

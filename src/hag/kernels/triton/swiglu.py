@@ -55,14 +55,15 @@ def _swiglu_fwd(G, U, O, n_elements, BLOCK: tl.constexpr):
 #: 512 x 14336 the same kernel is 1.74x faster. The crossover sits between those
 #: two, and `hag.bench_ops` sweeps 1/8/32/64/128/512/2048 rows and reports the
 #: crossover directly, so this constant is set from a measurement rather than
-#: taste. The current value is the midpoint of the bracket the first T4 sweep
-#: established; rerun the sweep on new hardware and read `crossover_rows` from
-#: the JSON before trusting it there.
+#: taste. The T4 sweep put it at 32: 8 rows loses at 0.43x, 32 rows wins at
+#: 1.23x and every larger count keeps winning. Rerun the sweep on new hardware
+#: and read `crossover_rows` from the JSON before trusting this value there,
+#: since it is a function of launch cost and launch cost is not portable.
 #:
 #: Note this threshold is specific to `swiglu`. `rmsnorm_residual` wins at every
 #: row count measured, including 1, because it removes a whole round trip of the
 #: hidden state rather than one intermediate, so it is not gated.
-SWIGLU_MIN_ROWS = 64
+SWIGLU_MIN_ROWS = 32
 
 
 def swiglu_triton(gate: torch.Tensor, up: torch.Tensor) -> torch.Tensor:

@@ -25,6 +25,19 @@ from pathlib import Path
 from . import devices, models
 
 
+def _summarise(samples: list[dict], key: str) -> dict:
+    """Median plus observed range for one metric across repeats."""
+    vals = sorted(s[key] for s in samples)
+    n = len(vals)
+    median = vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2
+    return {
+        "median": round(median, 3),
+        "min": round(vals[0], 3),
+        "max": round(vals[-1], 3),
+        "samples": n,
+    }
+
+
 def _peak_memory_bytes(backend: str) -> int:
     if backend == "cuda":
         import torch
@@ -165,6 +178,10 @@ def main() -> None:
     ap.add_argument("--prompt-tokens", type=int, default=512)
     ap.add_argument("--new-tokens", type=int, default=128)
     ap.add_argument("--dtype", default="fp16", choices=["fp16", "bf16", "fp32"])
+    ap.add_argument(
+        "--repeats", type=int, default=5,
+        help="alternating baseline/fused measurements; medians are reported",
+    )
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
@@ -182,23 +199,69 @@ def main() -> None:
     print(f"model  : {args.model} ({args.dtype})")
 
     model, tokenizer = models.load_model_and_tokenizer(args.model, dt, device)
-
-    baseline = run_once(model, tokenizer, backend, args.prompt_tokens, args.new_tokens)
-    print(f"baseline: {baseline['decode_tok_per_s']:.2f} tok/s decode, "
-          f"{baseline['peak_memory_gb']:.2f} GB peak")
+    unpatched = {m: m.forward for m in model.modules()}
 
     patched_modules = patch_model(model, backend)
-    gc.collect()
+    patched_forward = {m: m.forward for m in model.modules()}
 
+    def restore(mapping):
+        for module, fn in mapping.items():
+            module.forward = fn
+
+    # Baseline and fused are measured alternately rather than one after the
+    # other. A shared GPU drifts: across two runs of this benchmark the
+    # *unpatched* model measured 32.24 and then 25.98 tok/s, a 20% swing with
+    # nothing changed. Timed in sequence, that drift lands entirely on whichever
+    # configuration ran second and is indistinguishable from a result.
+    base_samples, fused_samples = [], []
+    for i in range(args.repeats):
+        restore(unpatched)
+        gc.collect()
+        base_samples.append(
+            run_once(model, tokenizer, backend, args.prompt_tokens, args.new_tokens)
+        )
+        if patched_modules:
+            restore(patched_forward)
+            gc.collect()
+            fused_samples.append(
+                run_once(model, tokenizer, backend, args.prompt_tokens, args.new_tokens)
+            )
+        print(
+            f"  repeat {i + 1}/{args.repeats}: "
+            f"baseline {base_samples[-1]['decode_tok_per_s']:.2f}"
+            + (f", fused {fused_samples[-1]['decode_tok_per_s']:.2f}" if patched_modules else "")
+            + " tok/s decode"
+        )
+    restore(unpatched)
+
+    baseline = dict(base_samples[-1])
+    baseline["decode_tok_per_s_stats"] = _summarise(base_samples, "decode_tok_per_s")
+    baseline["prefill_tok_per_s_stats"] = _summarise(base_samples, "prefill_tok_per_s")
+    baseline["decode_tok_per_s"] = baseline["decode_tok_per_s_stats"]["median"]
+    baseline["prefill_tok_per_s"] = baseline["prefill_tok_per_s_stats"]["median"]
+
+    fused = speedup = None
     if patched_modules:
-        fused = run_once(model, tokenizer, backend, args.prompt_tokens, args.new_tokens)
-        print(f"fused   : {fused['decode_tok_per_s']:.2f} tok/s decode, "
-              f"{fused['peak_memory_gb']:.2f} GB peak")
+        fused = dict(fused_samples[-1])
+        fused["decode_tok_per_s_stats"] = _summarise(fused_samples, "decode_tok_per_s")
+        fused["prefill_tok_per_s_stats"] = _summarise(fused_samples, "prefill_tok_per_s")
+        fused["decode_tok_per_s"] = fused["decode_tok_per_s_stats"]["median"]
+        fused["prefill_tok_per_s"] = fused["prefill_tok_per_s_stats"]["median"]
         speedup = fused["decode_tok_per_s"] / baseline["decode_tok_per_s"]
-        print(f"decode speedup: {speedup:.3f}x")
+
+        bs, fs = baseline["decode_tok_per_s_stats"], fused["decode_tok_per_s_stats"]
+        print(f"\nbaseline decode: {bs['median']:.2f} tok/s "
+              f"(range {bs['min']:.2f} to {bs['max']:.2f} over {bs['samples']})")
+        print(f"fused    decode: {fs['median']:.2f} tok/s "
+              f"(range {fs['min']:.2f} to {fs['max']:.2f} over {fs['samples']})")
+        print(f"decode speedup : {speedup:.3f}x")
+        if fs["min"] <= bs["max"] and bs["min"] <= fs["max"]:
+            print(
+                "\nThe two ranges overlap. Run-to-run spread is at least as large as\n"
+                "the difference, so this speedup is not resolved. Raise --repeats, or\n"
+                "measure on a machine you are not sharing."
+            )
     else:
-        fused = None
-        speedup = None
         print(
             "\nNo fused kernels applied: the Triton kernels are CUDA-only, so on this\n"
             "device the run above is the unmodified baseline. It is still recorded,\n"
@@ -211,6 +274,7 @@ def main() -> None:
         "dtype": args.dtype,
         "device": info,
         "patched_modules": sorted(set(patched_modules)),
+        "repeats": args.repeats,
         "baseline": baseline,
         "fused": fused,
         "decode_speedup": None if speedup is None else round(speedup, 4),

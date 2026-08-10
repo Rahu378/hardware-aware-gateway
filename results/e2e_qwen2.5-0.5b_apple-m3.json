@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-08-10T00:31:26+00:00",
+  "generated_utc": "2026-08-10T01:36:25+00:00",
   "model": "Qwen/Qwen2.5-0.5B",
   "dtype": "fp32",
   "device": {
@@ -15,15 +15,28 @@
     "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O"
   },
   "patched_modules": [],
+  "repeats": 3,
   "baseline": {
     "prefill_tokens": 128,
-    "prefill_s": 0.10189,
-    "prefill_tok_per_s": 1256.3,
+    "prefill_s": 0.10289,
+    "prefill_tok_per_s": 1254.1,
     "decode_tokens": 16,
-    "decode_s": 0.6117,
-    "decode_tok_per_s": 26.16,
-    "ms_per_output_token": 38.231,
-    "peak_memory_gb": 2.077
+    "decode_s": 0.51021,
+    "decode_tok_per_s": 30.36,
+    "ms_per_output_token": 31.888,
+    "peak_memory_gb": 2.077,
+    "decode_tok_per_s_stats": {
+      "median": 30.36,
+      "min": 29.49,
+      "max": 31.36,
+      "samples": 3
+    },
+    "prefill_tok_per_s_stats": {
+      "median": 1254.1,
+      "min": 1244.1,
+      "max": 1256.2,
+      "samples": 3
+    }
   },
   "fused": null,
   "decode_speedup": null
