@@ -25,6 +25,20 @@ from pathlib import Path
 
 from . import devices, models
 
+#: record_function range names, which wrap kernels rather than being kernels.
+REGIME_RANGES = frozenset({"prefill", "decode"})
+
+
+def _is_device_kernel(name: str) -> bool:
+    """True for an actual CUDA kernel rather than a dispatcher-level op.
+
+    `key_averages()` returns both, nested: `aten::mm` is an ATen op whose GPU
+    time is spent inside `gemv2T_kernel_val`. Summing the two double-counts.
+    Only the device kernels partition the GPU timeline, so shares are computed
+    over those alone.
+    """
+    return not name.startswith(("aten::", "cudaLaunch", "Optimizer", "autograd::"))
+
 
 def _self_device_us(evt) -> float:
     """Self GPU time for one event, across torch's renames of the field."""
@@ -99,10 +113,21 @@ def profile_model(model, input_ids, backend: str, new_tokens: int, out_dir: Path
     trace = out_dir / f"torch_trace_{stamp}.json"
     prof.export_chrome_trace(str(trace))
 
+    # `prefill` and `decode` are record_function ranges, not kernels. They span
+    # everything inside them, so counting them alongside the kernels they
+    # contain double-counts the total and makes every kernel's share look
+    # smaller than it is. torch prints the range at 268% of self CUDA time for
+    # exactly this reason. They are reported separately.
+    ranges: dict[str, float] = {}
     events = []
     for evt in prof.key_averages():
         self_us = _self_device_us(evt) if has_device_time else float(evt.self_cpu_time_total)
         if self_us <= 0:
+            continue
+        if evt.key in REGIME_RANGES:
+            ranges[evt.key] = round(self_us, 1)
+            continue
+        if has_device_time and not _is_device_kernel(evt.key):
             continue
         events.append(
             {
@@ -122,6 +147,8 @@ def profile_model(model, input_ids, backend: str, new_tokens: int, out_dir: Path
     return {
         "timed_on": "gpu" if has_device_time else "cpu",
         "trace": str(trace),
+        "regime_us": ranges,
+        "kernel_self_us_total": round(total, 1),
         "top_kernels": events[:40],
     }
 

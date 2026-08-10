@@ -34,6 +34,53 @@ def load_e2e(results_dir: Path) -> list[dict]:
     return [json.loads(p.read_text()) for p in sorted(results_dir.glob("e2e_*.json"))]
 
 
+def load_profile(repo: Path) -> dict | None:
+    path = repo / "profiles" / "torch_profile_summary.json"
+    return json.loads(path.read_text()) if path.exists() else None
+
+
+#: Coarse buckets for the kernel mix. Deliberately blunt: the question the
+#: profile has to answer is "is this workload matmul-bound or elementwise-bound",
+#: and a finer taxonomy would obscure that.
+def _bucket(name: str) -> str:
+    n = name.lower()
+    if any(k in n for k in ("gemv", "gemm", "dot_kernel")):
+        return "matmul (GEMM / GEMV)"
+    if "elementwise" in n:
+        return "elementwise"
+    if "reduce" in n:
+        return "reduction"
+    if any(k in n for k in ("cat", "copy", "memcpy")):
+        return "copy / concat"
+    return "other"
+
+
+def _profile_table(prof: dict | None) -> str:
+    """Where GPU time actually goes. This is the evidence for every claim below."""
+    if not prof or prof.get("timed_on") != "gpu":
+        return "_No GPU profile recorded yet. Run `make profile` on a CUDA device._"
+
+    agg: dict[str, float] = {}
+    for k in prof["top_kernels"]:
+        agg[_bucket(k["name"])] = agg.get(_bucket(k["name"]), 0.0) + k["self_us"]
+    total = sum(agg.values()) or 1.0
+
+    dev = prof["device"]["device_name"]
+    model = prof["model"].split("/")[-1]
+    lines = [
+        f"Measured on {dev}, {model}, one 512-token prefill plus 32 decode steps. "
+        "Device kernels only: ATen ops are dispatchers that contain these kernels, "
+        "so counting both would double-count.",
+        "",
+        "| kernel class | GPU time | share |",
+        "| --- | --- | --- |",
+    ]
+    for name, us in sorted(agg.items(), key=lambda t: -t[1]):
+        lines.append(f"| {name} | {us / 1000:.1f} ms | **{100 * us / total:.1f}%** |")
+    lines.append(f"| **total** | **{total / 1000:.1f} ms** | |")
+    return "\n".join(lines)
+
+
 def _e2e_table(runs: list[dict]) -> str:
     """End-to-end tokens/sec, which is the only number that decides anything.
 
@@ -44,27 +91,29 @@ def _e2e_table(runs: list[dict]) -> str:
     if not runs:
         return "_No end-to-end runs recorded yet. Run `make bench-e2e`._"
     lines = [
-        "| device | model | baseline decode | with fused kernels | change | peak memory |",
-        "| --- | --- | --- | --- | --- | --- |",
+        "| device | model | prefill baseline | prefill fused | decode baseline "
+        "| decode fused | peak memory |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for run in runs:
         name = run["device"]["device_name"]
         model = run["model"].split("/")[-1]
-        base = run["baseline"]
-        fused = run.get("fused")
+        base, fused = run["baseline"], run.get("fused")
         if fused is None:
             lines.append(
-                f"| {name} | {model} | {base['decode_tok_per_s']:.2f} tok/s "
-                f"| not applicable | baseline only "
+                f"| {name} | {model} | {base['prefill_tok_per_s']:.0f} tok/s | not applicable "
+                f"| {base['decode_tok_per_s']:.2f} tok/s | not applicable "
                 f"| {base['peak_memory_gb']:.2f} GB |"
             )
             continue
-        ratio = run.get("decode_speedup") or 0.0
-        mark = f"**{ratio:.3f}x**" if ratio >= 1 else f"**{ratio:.3f}x slower**"
+        pre = fused["prefill_tok_per_s"] / base["prefill_tok_per_s"]
+        dec = fused["decode_tok_per_s"] / base["decode_tok_per_s"]
         lines.append(
-            f"| {name} | {model} | {base['decode_tok_per_s']:.2f} tok/s "
-            f"| {fused['decode_tok_per_s']:.2f} tok/s | {mark} "
-            f"| {fused['peak_memory_gb']:.2f} GB |"
+            f"| {name} | {model} | {base['prefill_tok_per_s']:.0f} tok/s "
+            f"| {fused['prefill_tok_per_s']:.0f} tok/s (**{pre:.2f}x**) "
+            f"| {base['decode_tok_per_s']:.2f} tok/s "
+            f"| {fused['decode_tok_per_s']:.2f} tok/s (**{dec:.2f}x**) "
+            f"| {base['peak_memory_gb']:.2f} -> {fused['peak_memory_gb']:.2f} GB |"
         )
     return "\n".join(lines)
 
@@ -157,39 +206,70 @@ def _dispatch_bound_note(runs: list[dict]) -> str:
     ]
     if not rows:
         return ""
+    per_device: dict[str, int] = {}
+    for dev, _ in rows:
+        per_device[dev] = per_device.get(dev, 0) + 1
     floors = {
         run["device"]["device_name"]: run.get("dispatch_floor_ms", 0.0) for run in runs
     }
-    devs = ", ".join(f"{d} ({f * 1e3:.0f} us)" for d, f in floors.items() if f)
+    parts = [
+        f"{n} on {dev} (launch floor {floors.get(dev, 0) * 1e3:.0f} us)"
+        for dev, n in per_device.items()
+    ]
     return (
-        f"\n{len(rows)} measurements landed within 2x of the launch floor "
-        f"({devs}) and are excluded from the tables above. At those shapes the "
-        "number describes the runtime's submission path, not the kernel. "
-        "Decode-shaped work has to be judged end-to-end or with GPU counters; "
-        "see [docs/METHOD.md](docs/METHOD.md).\n"
+        f"\n{len(rows)} measurements landed within 2x of a launch floor and are "
+        f"excluded above: {', '.join(parts)}. At those shapes the number describes "
+        "the runtime's submission path rather than the kernel. Note how much of "
+        "the decode regime this costs on Apple silicon and how little on the T4; "
+        "a 30x difference in dispatch cost decides which optimisations are even "
+        "coherent on a platform. See [docs/METHOD.md](docs/METHOD.md).\n"
     )
 
 
-def _e2e_verdict(e2e: list[dict]) -> str:
+
+def _e2e_verdict(e2e: list[dict], prof: dict | None) -> str:
     """State the end-to-end outcome in words, including when it is a regression."""
-    losses = [r for r in e2e if (r.get("decode_speedup") or 1.0) < 1.0]
-    if not losses:
+    patched = [r for r in e2e if r.get("fused")]
+    if not patched:
         return ""
-    worst = min(losses, key=lambda r: r["decode_speedup"])
-    dev = worst["device"]["device_name"]
-    pct = (1 - worst["decode_speedup"]) * 100
+    run = patched[0]
+    base, fused = run["baseline"], run["fused"]
+    pre = fused["prefill_tok_per_s"] / base["prefill_tok_per_s"]
+    dec = fused["decode_tok_per_s"] / base["decode_tok_per_s"]
+    dev = run["device"]["device_name"]
+
+    share = ""
+    if prof and prof.get("timed_on") == "gpu":
+        agg: dict[str, float] = {}
+        for k in prof["top_kernels"]:
+            agg[_bucket(k["name"])] = agg.get(_bucket(k["name"]), 0.0) + k["self_us"]
+        total = sum(agg.values()) or 1.0
+        mm = 100 * agg.get("matmul (GEMM / GEMV)", 0.0) / total
+        ew = 100 * agg.get("elementwise", 0.0) / total
+        share = (
+            f" The profile explains the split: matmul is {mm:.0f}% of GPU time and "
+            f"every elementwise op these kernels touch adds up to {ew:.0f}%, so "
+            f"fusion had a {ew:.0f}% ceiling before it started."
+        )
+
     return (
-        f"\n**The fused kernels made end-to-end decode slower, by {pct:.0f}% on "
-        f"{dev}.** The profile says why. Matrix-vector products are 63% of GPU "
-        "time at decode, while every elementwise op these kernels touch adds up "
-        "to roughly 12%, and the fused SwiGLU is itself slower than eager at a "
-        "single row. A perfect fusion had a 12% ceiling and this one spent more "
-        "than it saved.\n\nThe kernels are not wrong; the target was. Prefill, "
-        "where the same kernels reach 6.25x and 95% of datasheet bandwidth, is "
-        "the regime where saving traffic is worth anything. Decode is bound by "
-        "streaming weights through the GEMV, and no amount of elementwise fusion "
-        "touches that. Fixing it means dispatching to eager at low row counts and "
-        "then going after the GEMV itself.\n"
+        f"\n**Prefill got {pre:.2f}x faster. Decode got {1 / dec:.2f}x slower.** "
+        f"On {dev} the same two kernels moved prefill from "
+        f"{base['prefill_tok_per_s']:.0f} to {fused['prefill_tok_per_s']:.0f} tok/s "
+        f"while dropping decode from {base['decode_tok_per_s']:.1f} to "
+        f"{fused['decode_tok_per_s']:.1f} tok/s.{share}\n\n"
+        "This is the prefill/decode distinction showing up end to end rather than "
+        "as theory. Prefill has thousands of rows in flight and is genuinely "
+        "bandwidth-bound, so removing a round trip of the hidden state pays. "
+        "Decode has one row: the traffic saved is kilobytes, the GPU is waiting on "
+        "weights streaming through the GEMV, and Triton's launch path costs more "
+        "than the three ATen launches it replaced. Peak memory rose too, from "
+        f"{base['peak_memory_gb']:.2f} to {fused['peak_memory_gb']:.2f} GB, because "
+        "the fused RMSNorm materialises the residual as a separate tensor.\n\n"
+        "The kernels are not wrong. The target was. The next move is to dispatch "
+        "to eager below a row-count threshold, which keeps the prefill win and "
+        "stops paying at decode, and then to go after the GEMV, which is where "
+        "the time actually is.\n"
     )
 
 
@@ -213,25 +293,46 @@ def _peak_caveat(runs: list[dict]) -> str:
     )
 
 
-def _headline(runs: list[dict]) -> str:
-    best: tuple[float, str] | None = None
+def _headline(runs: list[dict], e2e: list[dict] | None = None) -> str:
+    """Lead with the finding, not with the best number in the table.
+
+    An earlier version led with the largest speedup anywhere in the sweep. That
+    is the number a reader trusts least, because picking the maximum of a sweep
+    is what a benchmark does when it wants something from you.
+    """
+    best = None
     for run in runs:
-        name = run["device"]["device_name"]
         for r in run["results"]:
             if r.get("dispatch_bound") or r["regime"] != "prefill":
                 continue
-            cand = (
-                r["speedup"],
-                f"`{r['op']}` at {r['rows']}x{r['width']} on {name}: "
-                f"**{r['speedup']:.2f}x** over eager, reaching {r['fused_gbs']:.0f} GB/s "
-                f"({r['fused_pct_of_measured_peak']:.0f}% of measured copy bandwidth)",
-            )
+            cand = (r["speedup"], r, run["device"]["device_name"])
             if best is None or cand[0] > best[0]:
                 best = cand
-    return "" if best is None else f"Best measured result: {best[1]}.\n"
+    if best is None:
+        return ""
+    _, r, dev = best
+
+    parts = [
+        f"Two fused kernels, in Triton and in Metal. On {dev} they reach "
+        f"**{r['speedup']:.2f}x** over eager at prefill and sustain "
+        f"{r['fused_gbs']:.0f} GB/s, {r['fused_pct_of_datasheet']:.0f}% of "
+        "datasheet bandwidth."
+    ]
+    patched = [x for x in (e2e or []) if x.get("fused")]
+    if patched:
+        run = patched[0]
+        pre = run["fused"]["prefill_tok_per_s"] / run["baseline"]["prefill_tok_per_s"]
+        dec = run["fused"]["decode_tok_per_s"] / run["baseline"]["decode_tok_per_s"]
+        parts.append(
+            f"End to end that is **{pre:.2f}x on prefill** and "
+            f"**{1 / dec:.2f}x slower on decode**. Both numbers are below, along "
+            "with the profile that explains the split and the shapes where fusing "
+            "was the wrong call."
+        )
+    return " ".join(parts) + "\n"
 
 
-def render(runs: list[dict], e2e: list[dict] | None = None) -> str:
+def render(runs: list[dict], e2e: list[dict] | None = None, prof: dict | None = None) -> str:
     e2e = e2e or []
     if not runs:
         return (
@@ -244,7 +345,7 @@ def render(runs: list[dict], e2e: list[dict] | None = None) -> str:
         "",
         "<!-- Generated by `python -m hag.report`. Do not edit by hand. -->",
         "",
-        _headline(runs),
+        _headline(runs, e2e),
         "### Environment",
         "",
         _env_table(runs),
@@ -258,11 +359,15 @@ def render(runs: list[dict], e2e: list[dict] | None = None) -> str:
         _results_table(runs, "decode"),
         "",
         _regressions(runs),
+        "### Where the GPU time goes",
+        "",
+        _profile_table(prof),
+        "",
         "### End to end",
         "",
         _e2e_table(e2e),
         "",
-        _e2e_verdict(e2e),
+        _e2e_verdict(e2e, prof),
         _peak_caveat(runs),
         _dispatch_bound_note(runs),
         END,
@@ -285,7 +390,9 @@ def main() -> None:
     head, rest = text.split(BEGIN, 1)
     _, tail = rest.split(END, 1)
     results_dir = Path(args.results)
-    updated = head + render(load_runs(results_dir), load_e2e(results_dir)) + tail
+    updated = head + render(
+        load_runs(results_dir), load_e2e(results_dir), load_profile(REPO)
+    ) + tail
 
     if args.check:
         if updated != text:

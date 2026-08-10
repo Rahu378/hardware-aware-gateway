@@ -1,0 +1,42 @@
+{
+  "generated_utc": "2026-08-10T00:51:06+00:00",
+  "model": "Qwen/Qwen2.5-1.5B",
+  "dtype": "fp16",
+  "device": {
+    "backend": "cuda",
+    "device_name": "Tesla T4",
+    "spec": {
+      "name": "NVIDIA T4",
+      "peak_bandwidth_gbs": 320.0,
+      "peak_tflops_fp16": 65.0,
+      "memory_gb": 16.0,
+      "source": "NVIDIA T4 datasheet"
+    },
+    "platform": "Linux-6.6.122+-x86_64-with-glibc2.35"
+  },
+  "patched_modules": [
+    "Qwen2MLP.forward -> triton.swiglu",
+    "Qwen2RMSNorm.forward -> triton.rmsnorm"
+  ],
+  "baseline": {
+    "prefill_tokens": 512,
+    "prefill_s": 0.12147,
+    "prefill_tok_per_s": 4215.0,
+    "decode_tokens": 128,
+    "decode_s": 3.97028,
+    "decode_tok_per_s": 32.24,
+    "ms_per_output_token": 31.018,
+    "peak_memory_gb": 3.286
+  },
+  "fused": {
+    "prefill_tokens": 512,
+    "prefill_s": 0.09684,
+    "prefill_tok_per_s": 5287.3,
+    "decode_tokens": 128,
+    "decode_s": 4.76412,
+    "decode_tok_per_s": 26.87,
+    "ms_per_output_token": 37.22,
+    "peak_memory_gb": 3.537
+  },
+  "decode_speedup": 0.8334
+}
