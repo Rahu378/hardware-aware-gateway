@@ -4,12 +4,14 @@ This module exists because the answer changed the project's direction. The plan
 was to write a GEMV kernel next, since matmul is the largest share of decode GPU
 time. Putting the measured numbers against the roofline first said not to:
 
-    GEMV kernel time per decode step   12.1 ms
     bandwidth floor for the weights    12.8 ms
+    GEMV kernel time per decode step   14.7 ms   (87% of the floor)
+    measured wall clock                32.5 ms   (39% of the floor)
 
-cuBLAS is already at the memory wall, so a hand-written GEMV has nothing to
-take. The wall clock was 33.2 ms per token, meaning the GPU sat idle for roughly
-two thirds of decode while the CPU issued about 1200 op dispatches per token.
+A flawless GEMV would recover the 1.9 ms between those first two lines, under
+6% of a token. The 17.8 ms between kernel time and wall clock is the CPU
+issuing roughly six thousand op dispatches per token at about 3 us each, and
+that is 55% of the token.
 
 Decode on this machine is dispatch-bound, not bandwidth-bound. That is a
 different problem with a different fix, and the only reason to know it is having
@@ -80,17 +82,36 @@ def analyse(profile: dict, e2e: dict, ops: dict) -> dict | None:
                 "bandwidth_ceiling_tok_per_s": round(1e3 / floor_ms, 1),
                 "measured_fraction_of_roofline": round(floor_ms / (1e3 / tok_per_s), 3),
                 "gemv_ms_per_decode_step": round(gemv_ms, 2),
-                # Above 1.0 means the GEMV beats a copy, which it can: a copy is
-                # one read per write, a GEMV is almost pure read, and reads
-                # sustain better. It says the kernel is read-bandwidth-bound.
+                # Can legitimately exceed 1.0: the floor uses a copy, which is
+                # one read per write, while a GEMV is almost pure read and reads
+                # sustain better. So a value near or above 1.0 both mean the same
+                # thing, that the kernel is at the memory wall.
                 "gemv_fraction_of_roofline": round(floor_ms / gemv_ms, 3) if gemv_ms else None,
             }
         )
 
     dispatches = profile.get("dispatches_per_forward")
-    if dispatches:
+    if dispatches and "gemv_ms_per_decode_step" in out:
+        # Per-dispatch cost is derived, not assumed. An earlier version of this
+        # assumed 20 us and produced 119 ms of implied launch cost for a 32 ms
+        # token, which is impossible on its face; the measured figure is about
+        # 3 us, the usual cost of a PyTorch eager dispatch.
+        gap_ms = out["measured_decode_ms_per_token"] - out["gemv_ms_per_decode_step"]
         out["op_dispatches_per_token"] = dispatches
-        out["implied_cpu_launch_ms_at_20us"] = round(dispatches * 20 / 1000, 1)
+        out["cpu_gap_ms_per_token"] = round(gap_ms, 1)
+        out["cpu_gap_fraction_of_token"] = round(
+            gap_ms / out["measured_decode_ms_per_token"], 3
+        )
+        out["implied_us_per_dispatch"] = round(gap_ms * 1000 / dispatches, 2)
+
+    if "gemv_ms_per_decode_step" in out:
+        # What a flawless GEMV would actually be worth, which is the number that
+        # decides whether writing one is a good use of a week.
+        recoverable = out["gemv_ms_per_decode_step"] - out["bandwidth_floor_ms_per_token"]
+        out["perfect_gemv_would_recover_ms"] = round(max(recoverable, 0.0), 2)
+        out["perfect_gemv_would_recover_fraction"] = round(
+            max(recoverable, 0.0) / out["measured_decode_ms_per_token"], 3
+        )
 
     return out
 

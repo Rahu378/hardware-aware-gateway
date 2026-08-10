@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-08-10T00:51:06+00:00",
+  "generated_utc": "2026-08-10T06:18:01+00:00",
   "model": "Qwen/Qwen2.5-1.5B",
   "dtype": "fp16",
   "device": {
@@ -15,28 +15,117 @@
     "platform": "Linux-6.6.122+-x86_64-with-glibc2.35"
   },
   "patched_modules": [
-    "Qwen2MLP.forward -> triton.swiglu",
+    "Qwen2MLP.forward -> triton.swiglu (fused at >= 32 rows)",
     "Qwen2RMSNorm.forward -> triton.rmsnorm"
+  ],
+  "repeats": 16,
+  "weight_bytes": 3087428608,
+  "baseline_samples": [
+    27.55,
+    26.93,
+    31.87,
+    31.69,
+    28.55,
+    28.1,
+    31.35,
+    32.06,
+    27.17,
+    29.41,
+    32.34,
+    31.8,
+    26.97,
+    30.46,
+    31.99,
+    31.1
+  ],
+  "fused_samples": [
+    33.3,
+    33.17,
+    28.12,
+    32.0,
+    33.62,
+    33.32,
+    28.48,
+    33.12,
+    33.11,
+    31.77,
+    28.46,
+    33.05,
+    32.79,
+    29.79,
+    29.53,
+    33.06
   ],
   "baseline": {
     "prefill_tokens": 512,
-    "prefill_s": 0.12147,
-    "prefill_tok_per_s": 4215.0,
+    "prefill_s": 0.11276,
+    "prefill_tok_per_s": 4706.25,
     "decode_tokens": 128,
-    "decode_s": 3.97028,
-    "decode_tok_per_s": 32.24,
-    "ms_per_output_token": 31.018,
-    "peak_memory_gb": 3.286
+    "decode_s": 4.11601,
+    "decode_tok_per_s": 30.78,
+    "ms_per_output_token": 32.156,
+    "peak_memory_gb": 3.286,
+    "decode_tok_per_s_stats": {
+      "median": 30.78,
+      "min": 26.93,
+      "max": 32.34,
+      "samples": 16
+    },
+    "prefill_tok_per_s_stats": {
+      "median": 4706.25,
+      "min": 4540.6,
+      "max": 5020.5,
+      "samples": 16
+    },
+    "paired_decode": {
+      "samples": 16,
+      "mean_diff": 1.7094,
+      "sd_diff": 3.6824,
+      "t": 1.857,
+      "t_crit_95": 2.131,
+      "resolved": false,
+      "repeats_needed_estimate": 21,
+      "diffs": [
+        5.75,
+        6.24,
+        -3.75,
+        0.31,
+        5.07,
+        5.22,
+        -2.87,
+        1.06,
+        5.94,
+        2.36,
+        -3.88,
+        1.25,
+        5.82,
+        -0.67,
+        -2.46,
+        1.96
+      ]
+    }
   },
   "fused": {
     "prefill_tokens": 512,
-    "prefill_s": 0.09684,
-    "prefill_tok_per_s": 5287.3,
+    "prefill_s": 0.10574,
+    "prefill_tok_per_s": 4938.3,
     "decode_tokens": 128,
-    "decode_s": 4.76412,
-    "decode_tok_per_s": 26.87,
-    "ms_per_output_token": 37.22,
-    "peak_memory_gb": 3.537
+    "decode_s": 3.87193,
+    "decode_tok_per_s": 32.92,
+    "ms_per_output_token": 30.249,
+    "peak_memory_gb": 3.286,
+    "decode_tok_per_s_stats": {
+      "median": 32.92,
+      "min": 28.12,
+      "max": 33.62,
+      "samples": 16
+    },
+    "prefill_tok_per_s_stats": {
+      "median": 4938.3,
+      "min": 4811.9,
+      "max": 5214.7,
+      "samples": 16
+    }
   },
-  "decode_speedup": 0.8334
+  "decode_speedup": 1.0695
 }

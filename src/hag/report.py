@@ -68,19 +68,30 @@ def _roofline_section(repo: Path, runs: list[dict], e2e: list[dict]) -> str:
             f"| GPU busy during decode | at most "
             f"**{100 * a['gpu_busy_fraction_upper_bound']:.0f}%** |"
         )
+    if "perfect_gemv_would_recover_ms" in a:
+        lines.append(
+            f"| a flawless GEMV would recover | "
+            f"{a['perfect_gemv_would_recover_ms']:.1f} ms "
+            f"({100 * a['perfect_gemv_would_recover_fraction']:.0f}% of a token) |"
+        )
     if "op_dispatches_per_token" in a:
         lines.append(
+            f"| CPU gap (wall minus kernel time) | {a['cpu_gap_ms_per_token']:.1f} ms "
+            f"(**{100 * a['cpu_gap_fraction_of_token']:.0f}% of a token**) |"
+        )
+        lines.append(
             f"| op dispatches per token | {a['op_dispatches_per_token']} "
-            f"(~{a['implied_cpu_launch_ms_at_20us']:.0f} ms of CPU launch cost) |"
+            f"at ~{a['implied_us_per_dispatch']:.1f} us each |"
         )
 
     verdict = (
         "\n**This is what stopped the next kernel from being written.** The plan "
         "said to target the GEMV, since matmul is the largest share of decode GPU "
-        "time. The arithmetic says cuBLAS is already at the memory wall there, so "
-        "a hand-written GEMV has nothing to take. The gap between 12 ms of kernel "
-        "time and 33 ms of wall clock is the CPU issuing roughly twelve hundred op "
-        "dispatches per token while the GPU waits.\n\nDecode here is "
+        "time. The arithmetic says cuBLAS already runs it near the memory wall, "
+        "and a flawless replacement would recover under 6% of a token. The real "
+        "gap is between kernel time and wall clock: the CPU issues thousands of op "
+        "dispatches per token, each a few microseconds, and the GPU waits through "
+        "all of it.\n\nDecode here is "
         "dispatch-bound, not bandwidth-bound. That points at CUDA graphs, which "
         "capture the decode step once and replay it without per-launch cost, and "
         "not at another kernel. It also explains why the end-to-end measurement "
@@ -470,11 +481,23 @@ def _headline(runs: list[dict], e2e: list[dict] | None = None) -> str:
         run = patched[0]
         pre = run["fused"]["prefill_tok_per_s"] / run["baseline"]["prefill_tok_per_s"]
         dec = run["fused"]["decode_tok_per_s"] / run["baseline"]["decode_tok_per_s"]
+        # An earlier version wrote "x slower" unconditionally, which read as
+        # 0.93x slower on a run where decode was 1.07x faster.
+        def phrase(ratio: float, regime: str) -> str:
+            if ratio >= 1:
+                return f"**{ratio:.2f}x on {regime}**"
+            return f"**{1 / ratio:.2f}x slower on {regime}**"
+
+        tail = (
+            " The decode figure is inside the run-to-run noise of a shared GPU and "
+            "the report below says so rather than claiming it."
+            if not _resolved(run)
+            else ""
+        )
         parts.append(
-            f"End to end that is **{pre:.2f}x on prefill** and "
-            f"**{1 / dec:.2f}x slower on decode**. Both numbers are below, along "
-            "with the profile that explains the split and the shapes where fusing "
-            "was the wrong call."
+            f"End to end that is {phrase(pre, 'prefill')} and "
+            f"{phrase(dec, 'decode')}.{tail} Both are below, with the profile that "
+            "explains them and the shapes where fusing was the wrong call."
         )
     return " ".join(parts) + "\n"
 
