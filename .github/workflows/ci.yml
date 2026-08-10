@@ -1,0 +1,44 @@
+name: ci
+
+# No GPU on GitHub runners, so this cannot verify a kernel. What it can do is
+# catch the failures that would otherwise waste a paid GPU session: an import
+# error, a syntax slip in a kernel wrapper, or README tables that have drifted
+# away from the JSON runs behind them.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install pytest ruff
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Tests
+        # Every GPU test skips here. The suite still proves the package imports
+        # with no backend present, which is the one thing CI can honestly check.
+        run: python -m pytest -q
+
+      - name: Kernel wrappers are syntactically valid
+        run: python -m compileall -q src/hag/kernels
+
+      - name: README tables match results/
+        run: python -m hag.report --check
+        env:
+          PYTHONPATH: src

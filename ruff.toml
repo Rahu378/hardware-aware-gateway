@@ -1,0 +1,15 @@
+line-length = 100
+target-version = "py310"
+
+# Colab cells legitimately mix shell magics with inline imports.
+extend-exclude = ["notebooks"]
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+# E731 fires on the Triton grid lambda, which is the idiom Triton's own API docs use.
+ignore = ["E731"]
+
+[lint.per-file-ignores]
+# Triton kernels use single-capital pointer names (X, W, Y, O) by convention,
+# matching the upstream tutorials and every kernel repo worth reading.
+"src/hag/kernels/triton/*.py" = ["E741", "F821"]

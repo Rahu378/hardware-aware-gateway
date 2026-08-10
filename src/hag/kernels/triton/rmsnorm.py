@@ -80,6 +80,12 @@ def _rmsnorm_residual_looped(
         acc += h * h
     rstd = 1.0 / tl.sqrt(tl.sum(acc, axis=0) / N + eps)
 
+    # The second loop re-reads what the first loop just wrote. Each lane reads
+    # back the column it wrote, so program order alone is arguably sufficient,
+    # but that leans on the two loops receiving identical layouts. The barrier
+    # makes the dependency explicit rather than incidental.
+    tl.debug_barrier()
+
     for start in range(0, N, BLOCK_N):
         cols = start + tl.arange(0, BLOCK_N)
         mask = cols < N
@@ -119,6 +125,9 @@ def rmsnorm(x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-6) -> torch.T
     """RMSNorm. Matches `hag.reference.rmsnorm`."""
     assert x.is_cuda, "Triton kernels require a CUDA device"
     x2d = x.reshape(-1, x.shape[-1]).contiguous()
+    # `W + cols` assumes a unit-stride weight vector; a sliced or transposed
+    # parameter would read the wrong elements without ever erroring.
+    weight = weight.contiguous()
     m, n = x2d.shape
     if n > ONE_PASS_LIMIT:
         raise ValueError(
@@ -167,6 +176,7 @@ def rmsnorm_residual(
     # A non-contiguous row stride would silently corrupt the flat indexing above.
     x2d = x2d.contiguous()
     res2d = res2d.contiguous()
+    weight = weight.contiguous()
 
     m, n = x2d.shape
     y = torch.empty_like(x2d)

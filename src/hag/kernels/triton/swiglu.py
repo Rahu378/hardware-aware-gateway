@@ -51,6 +51,9 @@ def swiglu(gate: torch.Tensor, up: torch.Tensor) -> torch.Tensor:
     assert gate.shape == up.shape, "gate and up must be the same shape"
     assert gate.is_cuda, "Triton kernels require a CUDA device"
 
+    if gate.dtype != up.dtype:
+        raise ValueError(f"dtype mismatch: {gate.dtype} vs {up.dtype}")
+
     gate = gate.contiguous()
     up = up.contiguous()
     out = torch.empty_like(gate)

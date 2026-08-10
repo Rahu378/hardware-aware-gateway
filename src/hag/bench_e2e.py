@@ -109,8 +109,19 @@ def run_once(model, tokenizer, backend: str, prompt_tokens: int, new_tokens: int
             torch.mps.synchronize()
 
     with torch.inference_mode():
-        # Warm up: the first call pays kernel autotuning and lazy allocation.
-        model(input_ids[:, :8])
+        # Warm up at the *exact* shapes that will be timed. A short warmup is
+        # worse than none here: `_swiglu_fwd` is autotuned and keyed on element
+        # count, so a warmup at a different sequence length leaves the real
+        # prefill to pay for the autotuning sweep inside the timed region.
+        # Decode is warmed separately for the same reason -- its element count
+        # differs from prefill's, and so is a separate autotune key.
+        warm = model(input_ids, use_cache=True)
+        model(
+            warm.logits[:, -1:].argmax(dim=-1),
+            past_key_values=warm.past_key_values,
+            use_cache=True,
+        )
+        del warm
         sync()
 
         t0 = time.perf_counter()

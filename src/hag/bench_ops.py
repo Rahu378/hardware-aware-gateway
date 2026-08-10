@@ -83,11 +83,11 @@ def _run_cuda(dtype_name: str, warmup: int, iters: int) -> list[dict]:
 
             reps = _inner_reps(m)
             base = timing.bench_ms(
-                lambda: reference.rmsnorm_residual(x, res, w),
+                lambda x=x, res=res, w=w: reference.rmsnorm_residual(x, res, w),
                 "cuda", warmup, iters, inner_reps=reps,
             )
             fused = timing.bench_ms(
-                lambda: tri_rmsnorm.rmsnorm_residual(x, res, w),
+                lambda x=x, res=res, w=w: tri_rmsnorm.rmsnorm_residual(x, res, w),
                 "cuda", warmup, iters, inner_reps=reps,
             )
             rows_out.append(
@@ -105,10 +105,10 @@ def _run_cuda(dtype_name: str, warmup: int, iters: int) -> list[dict]:
 
             reps = _inner_reps(m)
             base = timing.bench_ms(
-                lambda: reference.swiglu(g, u), "cuda", warmup, iters, inner_reps=reps
+                lambda g=g, u=u: reference.swiglu(g, u), "cuda", warmup, iters, inner_reps=reps
             )
             fused = timing.bench_ms(
-                lambda: tri_swiglu.swiglu(g, u), "cuda", warmup, iters, inner_reps=reps
+                lambda g=g, u=u: tri_swiglu.swiglu(g, u), "cuda", warmup, iters, inner_reps=reps
             )
             rows_out.append(
                 _record(
@@ -138,6 +138,8 @@ def _run_mlx(dtype_name: str, warmup: int, iters: int) -> list[dict]:
 
     def timed(fn):
         # MLX is lazy: without the eval we would be timing graph construction.
+        # `fn` binds its tensors as default arguments at definition time, so the
+        # closure cannot drift onto the next loop iteration's shapes.
         def run():
             mx.eval(fn())
 
@@ -152,11 +154,11 @@ def _run_mlx(dtype_name: str, warmup: int, iters: int) -> list[dict]:
 
             reps = _inner_reps(m)
             base = timing.bench_ms(
-                timed(lambda: mtl_rmsnorm.rmsnorm_residual_reference(x, res, w)),
+                timed(lambda x=x, res=res, w=w: mtl_rmsnorm.rmsnorm_residual_reference(x, res, w)),
                 "mlx", warmup, iters, inner_reps=reps,
             )
             fused = timing.bench_ms(
-                timed(lambda: mtl_rmsnorm.rmsnorm_residual(x, res, w)),
+                timed(lambda x=x, res=res, w=w: mtl_rmsnorm.rmsnorm_residual(x, res, w)),
                 "mlx", warmup, iters, inner_reps=reps,
             )
             rows_out.append(
@@ -175,11 +177,11 @@ def _run_mlx(dtype_name: str, warmup: int, iters: int) -> list[dict]:
 
             reps = _inner_reps(m)
             base = timing.bench_ms(
-                timed(lambda: mtl_swiglu.swiglu_reference(g, u)),
+                timed(lambda g=g, u=u: mtl_swiglu.swiglu_reference(g, u)),
                 "mlx", warmup, iters, inner_reps=reps,
             )
             fused = timing.bench_ms(
-                timed(lambda: mtl_swiglu.swiglu(g, u)),
+                timed(lambda g=g, u=u: mtl_swiglu.swiglu(g, u)),
                 "mlx", warmup, iters, inner_reps=reps,
             )
             rows_out.append(
@@ -281,7 +283,10 @@ def main() -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(payload, indent=2) + "\n")
 
-    header = f"\n{'op':<18}{'shape':>14}{'base ms':>10}{'fused ms':>10}{'speedup':>9}{'GB/s':>8}{'%peak':>7}"
+    header = (
+        f"\n{'op':<18}{'shape':>14}{'base ms':>10}"
+        f"{'fused ms':>10}{'speedup':>9}{'GB/s':>8}{'%peak':>7}"
+    )
     print(header)
     for r in rows:
         shape = f"{r['rows']}x{r['width']}"

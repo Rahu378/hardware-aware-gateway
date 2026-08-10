@@ -58,7 +58,8 @@ def _env_table(runs: list[dict]) -> str:
 
 def _results_table(runs: list[dict], regime: str) -> str:
     lines = [
-        "| device | op | shape (rows x width) | baseline | fused | speedup | eff. BW | % of measured peak |",
+        "| device | op | shape (rows x width) | baseline | fused | speedup "
+        "| eff. BW | % of measured peak |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     any_row = False
