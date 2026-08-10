@@ -187,8 +187,14 @@ sets up a free Colab T4 from a clean runtime.
 
 ## Reading the results honestly
 
-Four things in this repo are deliberately not presented the way a benchmark
+Five things in this repo are deliberately not presented the way a benchmark
 usually is.
+
+**End-to-end claims have to pass a significance test.** Baseline and fused are
+measured alternately, and the paired differences get a two-sided 95% t-test. If
+they fail it, the report says the difference is unresolved rather than printing
+the ratio. On a shared Colab T4 the unmodified model varies between 25 and 30
+tokens/sec, which is wider than most of the effects worth chasing.
 
 **Regressions are in the tables, not omitted.** Fused SwiGLU is 0.42x of eager
 at a single row, and end-to-end decode is 1.20x slower with the kernels

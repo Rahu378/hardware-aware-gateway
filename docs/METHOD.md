@@ -90,10 +90,22 @@ sequence, that drift lands entirely on whichever configuration happens to run
 second, and it is indistinguishable from a result. The first run showed the
 fused kernels 17% slower and the second showed them 23% faster.
 
-`bench_e2e` now alternates baseline and fused across `--repeats` and reports
-the median with the observed range. When the two ranges overlap the report says
-the difference is unresolved rather than printing a ratio. A speedup smaller
+`bench_e2e` alternates baseline and fused across `--repeats`, then tests the
+**paired** differences. The pairing matters: the two configurations run
+adjacently, so they share whatever the machine was doing at that moment, and
+differencing within a pair cancels that drift. An earlier version compared the
+two ranges for overlap, which discards the pairing and with it most of the
+sensitivity.
+
+The test is a two-sided 95% t-test on the paired differences. When it fails the
+report says the difference is unresolved instead of printing a ratio, and
+estimates how many repeats an effect that size would need. A speedup smaller
 than the noise floor of the machine you measured it on is not a speedup.
+
+Worked example from this repo, five repeats on a Colab T4: paired differences of
++6.14, +5.60, -2.67, -1.26, +2.69 tok/s. Mean +2.10, standard deviation 3.97,
+t = 1.18 against a critical value of 2.776. The median ratio was 1.079x, which
+would have looked perfectly quotable and meant nothing.
 
 ## Prefill and decode are different machines
 

@@ -24,6 +24,66 @@ from pathlib import Path
 
 from . import devices, models
 
+#: Two-sided t critical values at 95%, indexed by degrees of freedom.
+#: Small table rather than a scipy dependency; this benchmark should run on a
+#: bare Colab runtime with nothing but torch installed.
+_T_CRIT_95 = {
+    1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365,
+    8: 2.306, 9: 2.262, 10: 2.228, 12: 2.179, 15: 2.131, 20: 2.086,
+    24: 2.064, 30: 2.042, 40: 2.021, 60: 2.000,
+}
+
+
+def _t_crit(df: int) -> float:
+    if df <= 0:
+        return float("inf")
+    for k in sorted(_T_CRIT_95):
+        if df <= k:
+            return _T_CRIT_95[k]
+    return 1.96
+
+
+def _paired_stats(base: list[dict], fused: list[dict], key: str) -> dict:
+    """Paired analysis of baseline vs fused, which is how they were measured.
+
+    Baseline and fused run adjacently inside each repeat, so they share whatever
+    the machine was doing at that moment. Differencing within a pair cancels
+    that drift, and the test is far more sensitive than comparing the two
+    distributions independently. Comparing ranges throws the pairing away, which
+    on a shared GPU means throwing away most of the signal.
+
+    `resolved` is a two-sided 95% t-test on the paired differences: is the mean
+    difference distinguishable from zero given how much the differences scatter.
+    """
+    diffs = [f[key] - b[key] for b, f in zip(base, fused, strict=True)]
+    n = len(diffs)
+    if n < 2:
+        return {"samples": n, "resolved": False, "reason": "need at least 2 repeats"}
+
+    mean = sum(diffs) / n
+    var = sum((d - mean) ** 2 for d in diffs) / (n - 1)
+    sd = var ** 0.5
+    sem = sd / (n ** 0.5) if sd else 0.0
+    t = mean / sem if sem else float("inf") if mean else 0.0
+    crit = _t_crit(n - 1)
+
+    # Repeats needed for this effect size to clear the bar, as a hint rather
+    # than a promise: if the effect is real and this small, it takes this many.
+    needed = None
+    if sd and mean:
+        needed = int((2.1 * sd / abs(mean)) ** 2) + 1
+
+    return {
+        "samples": n,
+        "mean_diff": round(mean, 4),
+        "sd_diff": round(sd, 4),
+        "t": round(t, 3),
+        "t_crit_95": crit,
+        "resolved": abs(t) > crit,
+        "repeats_needed_estimate": needed,
+        "diffs": [round(d, 3) for d in diffs],
+    }
+
 
 def _summarise(samples: list[dict], key: str) -> dict:
     """Median plus observed range for one metric across repeats."""
@@ -250,16 +310,29 @@ def main() -> None:
         speedup = fused["decode_tok_per_s"] / baseline["decode_tok_per_s"]
 
         bs, fs = baseline["decode_tok_per_s_stats"], fused["decode_tok_per_s_stats"]
+        paired = _paired_stats(base_samples, fused_samples, "decode_tok_per_s")
+        baseline["paired_decode"] = paired
+
         print(f"\nbaseline decode: {bs['median']:.2f} tok/s "
               f"(range {bs['min']:.2f} to {bs['max']:.2f} over {bs['samples']})")
         print(f"fused    decode: {fs['median']:.2f} tok/s "
               f"(range {fs['min']:.2f} to {fs['max']:.2f} over {fs['samples']})")
         print(f"decode speedup : {speedup:.3f}x")
-        if fs["min"] <= bs["max"] and bs["min"] <= fs["max"]:
+        print(
+            f"\npaired difference: {paired['mean_diff']:+.2f} tok/s, "
+            f"sd {paired['sd_diff']:.2f}, t = {paired['t']:.2f} "
+            f"against t_crit {paired['t_crit_95']:.3f} at 95%"
+        )
+        if paired["resolved"]:
+            print("The difference is resolved: it is larger than the run-to-run scatter.")
+        else:
+            need = paired.get("repeats_needed_estimate")
             print(
-                "\nThe two ranges overlap. Run-to-run spread is at least as large as\n"
-                "the difference, so this speedup is not resolved. Raise --repeats, or\n"
-                "measure on a machine you are not sharing."
+                "NOT RESOLVED. The paired differences scatter more than they differ "
+                "from zero,\nso this speedup is not distinguishable from noise on this "
+                "machine."
+                + (f"\nAn effect this size would need roughly --repeats {need} to clear "
+                   "the bar." if need else "")
             )
     else:
         print(
@@ -275,6 +348,8 @@ def main() -> None:
         "device": info,
         "patched_modules": sorted(set(patched_modules)),
         "repeats": args.repeats,
+        "baseline_samples": [s["decode_tok_per_s"] for s in base_samples],
+        "fused_samples": [s["decode_tok_per_s"] for s in fused_samples],
         "baseline": baseline,
         "fused": fused,
         "decode_speedup": None if speedup is None else round(speedup, 4),

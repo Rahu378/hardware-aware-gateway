@@ -88,13 +88,20 @@ def _spread(section: dict, key: str) -> str:
     return f" <br><sub>{st['min']:.2f} to {st['max']:.2f}, n={st['samples']}</sub>"
 
 
+def _paired(run: dict) -> dict | None:
+    return run.get("baseline", {}).get("paired_decode")
+
+
 def _resolved(run: dict) -> bool:
-    """False when baseline and fused ranges overlap, i.e. the difference is noise."""
-    b = run.get("baseline", {}).get("decode_tok_per_s_stats")
-    f = (run.get("fused") or {}).get("decode_tok_per_s_stats")
-    if not b or not f or b.get("samples", 1) < 2:
-        return False
-    return not (f["min"] <= b["max"] and b["min"] <= f["max"])
+    """Whether the paired difference clears a two-sided 95% t-test.
+
+    Baseline and fused are measured adjacently, so the paired difference cancels
+    the drift they share. An earlier version compared the two ranges for
+    overlap, which discards the pairing and on a shared GPU discards most of the
+    signal with it.
+    """
+    paired = _paired(run)
+    return bool(paired and paired.get("resolved"))
 
 
 def _e2e_table(runs: list[dict]) -> str:
@@ -263,13 +270,32 @@ def _e2e_verdict(e2e: list[dict], prof: dict | None) -> str:
             "with the observed range; rerun it to get numbers worth quoting.\n"
         )
     if not _resolved(run):
+        paired = _paired(run) or {}
+        detail = ""
+        if paired:
+            detail = (
+                f" Over {n} alternating repeats the paired difference is "
+                f"{paired['mean_diff']:+.2f} tok/s with a standard deviation of "
+                f"{paired['sd_diff']:.2f}, giving t = {paired['t']:.2f} against a "
+                f"95% critical value of {paired['t_crit_95']:.2f}."
+            )
+            need = paired.get("repeats_needed_estimate")
+            if need:
+                detail += (
+                    f" If the effect is real and this small, separating it from the "
+                    f"noise would take roughly {need} repeats."
+                )
         return (
-            f"\n**Not resolved.** Over {n} alternating repeats the baseline and "
-            "fused decode ranges still overlap, so the difference is smaller than "
-            "the run-to-run spread of a shared GPU. The op-level tables above are "
-            "measured with `triton.testing.do_bench` over 100 replicates and do "
-            "not have this problem; this row does. Raise `--repeats`, or measure "
-            "on a machine you are not sharing.\n"
+            "\n**The end-to-end decode difference is not resolved.**" + detail +
+            "\n\nBaseline and fused are measured adjacently within each repeat, so "
+            "the paired difference already cancels the drift they share; the "
+            "scatter that remains is real and larger than the effect. A shared "
+            "Colab T4 moved the unpatched model between 25.08 and 30.21 tok/s "
+            "across five measurements of identical code.\n\nThe op-level tables "
+            "above do not have this problem. They use `triton.testing.do_bench` "
+            "over 100 replicates with an L2 flush between them, and the kernel "
+            "results there are solid. Reporting a headline speedup this benchmark "
+            "cannot distinguish from noise would undo that.\n"
         )
     pre = fused["prefill_tok_per_s"] / base["prefill_tok_per_s"]
     dec = fused["decode_tok_per_s"] / base["decode_tok_per_s"]
