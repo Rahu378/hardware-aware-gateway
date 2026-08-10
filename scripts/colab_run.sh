@@ -23,6 +23,26 @@ REPO_URL="https://github.com/Rahu378/hardware-aware-gateway.git"
 WORK="${HAG_WORK:-/content/hag-run}"
 MODEL="${HAG_MODEL:-Qwen/Qwen2.5-1.5B}"
 
+# Check for a GPU before doing anything else. Without this the script clones,
+# installs, silently skips all fifty GPU tests, and only fails two minutes later
+# inside the benchmark with "Torch not compiled with CUDA enabled", which reads
+# like a broken install rather than an unselected accelerator.
+echo "=== 0/7  check accelerator ==="
+if ! python -c "import torch, sys; sys.exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then
+    echo
+    echo "########################################################################"
+    echo "#  No CUDA device.                                                     #"
+    echo "#                                                                      #"
+    echo "#  In Colab:  Runtime > Change runtime type > T4 GPU > Save            #"
+    echo "#  Then run this cell again.                                           #"
+    echo "#                                                                      #"
+    echo "#  A CPU runtime skips every GPU test and measures nothing, so this    #"
+    echo "#  stops here rather than producing an archive that looks complete.    #"
+    echo "########################################################################"
+    exit 1
+fi
+python -c "import torch; print('GPU:', torch.cuda.get_device_name(0))"
+
 echo "=== 1/7  clone into ${WORK} ==="
 rm -rf "$WORK"
 git clone -q "$REPO_URL" "$WORK"
@@ -35,6 +55,18 @@ python -c "import hag; print('import OK:', hag.__file__)"
 
 echo "=== 3/7  correctness ==="
 python -m pytest -q
+# A suite that skips everything exits 0. Assert the CUDA half really ran, so
+# "all tests passed" cannot mean "no test touched a GPU".
+python - <<'CHECK'
+import subprocess, sys
+out = subprocess.run(
+    [sys.executable, "-m", "pytest", "-q", "-k", "triton or graphed", "--collect-only"],
+    capture_output=True, text=True,
+)
+if " no tests ran" in out.stdout or "0 tests collected" in out.stdout:
+    sys.exit("No CUDA tests were collected; the kernels were never exercised.")
+print("CUDA tests collected and run.")
+CHECK
 
 echo "=== 4/7  op-level sweep ==="
 python -m hag.bench_ops --backend cuda --dtype fp16
