@@ -13,6 +13,10 @@ rather than an editing session in a drawing tool.
 Written to a white card rather than a transparent background: GitHub renders
 README images against both light and dark page themes, and transparent SVGs
 with dark text vanish in dark mode.
+
+Both SVG and PNG are emitted. The README uses the SVG, which stays sharp at any
+zoom. Anything embedding by URL needs the PNG, because raw.githubusercontent
+serves .svg as text/plain and an image tag pointed at it renders nothing.
 """
 
 from __future__ import annotations
@@ -62,6 +66,12 @@ def _style():
 
 def _load(path: Path) -> dict:
     return json.loads(path.read_text()) if path.exists() else {}
+
+
+def _save(fig, path: Path) -> None:
+    """Write both formats: SVG for the README, PNG for anything embedding by URL."""
+    fig.savefig(path, format="svg", bbox_inches="tight")
+    fig.savefig(path.with_suffix(".png"), format="png", dpi=170, bbox_inches="tight")
 
 
 def chart_where_the_time_goes(plt, profile: dict, e2e: dict, graphs: dict) -> Path | None:
@@ -117,7 +127,7 @@ def chart_where_the_time_goes(plt, profile: dict, e2e: dict, graphs: dict) -> Pa
     ax.grid(axis="y", visible=False)
     fig.tight_layout()
     path = OUT / "where-the-time-goes.svg"
-    fig.savefig(path, format="svg", bbox_inches="tight")
+    _save(fig, path)
     plt.close(fig)
     return path
 
@@ -170,7 +180,7 @@ def chart_fusion_crossover(plt, ops_runs: list[dict]) -> Path | None:
     ax.legend(frameon=False, fontsize=8, loc="upper left")
     fig.tight_layout()
     path = OUT / "fusion-crossover.svg"
-    fig.savefig(path, format="svg", bbox_inches="tight")
+    _save(fig, path)
     plt.close(fig)
     return path
 
@@ -209,7 +219,7 @@ def chart_launch_floor(plt, ops_runs: list[dict]) -> Path | None:
     )
     fig.tight_layout()
     path = OUT / "launch-floor.svg"
-    fig.savefig(path, format="svg", bbox_inches="tight")
+    _save(fig, path)
     plt.close(fig)
     return path
 
