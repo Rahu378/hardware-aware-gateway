@@ -8,14 +8,14 @@
 or by CPU dispatch? A calculator anchored on measured data.">
 <style>
 :root{--ink:#12161c;--muted:#5b6572;--line:#e3e7ec;--bg:#fff;--card:#f7f9fb;
---blue:#2563eb;--grey:#9ca3af;--red:#dc2626;--green:#059669;}
+--blue:#2563eb;--grey:#9ca3af;--red:#dc2626;--green:#059669;--track:#cbd3dc;}
 @media(prefers-color-scheme:dark){:root{--ink:#e8ecf1;--muted:#9aa4b2;--line:#262c36;
---bg:#0d1117;--card:#151b23;}}
+--bg:#0d1117;--card:#151b23;--track:#39424e;}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);
 font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;}
 .wrap{max-width:900px;margin:0 auto;padding:0 20px}
-header{padding:56px 0 32px;border-bottom:1px solid var(--line)}
+header{padding:44px 0 32px;border-bottom:1px solid var(--line)}
 h1{font-size:clamp(28px,5vw,40px);line-height:1.15;margin:0 0 12px;letter-spacing:-.02em}
 h2{font-size:20px;margin:44px 0 6px;letter-spacing:-.01em}
 p{margin:0 0 14px;color:var(--muted)}
@@ -31,7 +31,22 @@ background:var(--card);padding:2px 5px;border-radius:4px}
 padding:22px;margin:18px 0}
 .controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:18px}
 label{display:block;font-size:13px;font-weight:600;margin-bottom:6px}
-select,input[type=range]{width:100%}
+select{width:100%}
+
+/* Range inputs need explicit styling: the platform default is a thin grey
+   track that all but disappears against the card, which is the same colour. */
+input[type=range]{width:100%;-webkit-appearance:none;appearance:none;
+background:transparent;height:24px;cursor:pointer}
+input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:99px;
+background:var(--track)}
+input[type=range]::-moz-range-track{height:6px;border-radius:99px;background:var(--track)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;
+width:20px;height:20px;margin-top:-7px;border-radius:50%;background:var(--blue);
+border:2px solid var(--bg);box-shadow:0 1px 4px rgba(0,0,0,.28)}
+input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;
+background:var(--blue);border:2px solid var(--bg);box-shadow:0 1px 4px rgba(0,0,0,.28)}
+input[type=range]:focus-visible::-webkit-slider-thumb{outline:2px solid var(--blue);
+outline-offset:2px}
 select{padding:8px;border:1px solid var(--line);border-radius:7px;
 background:var(--bg);color:var(--ink);font-size:14px}
 .val{font-size:13px;color:var(--muted);margin-top:4px}
@@ -53,12 +68,35 @@ td.n{font-variant-numeric:tabular-nums}
 .tag{font-size:11px;padding:2px 7px;border-radius:99px;border:1px solid var(--line);
 color:var(--muted)}
 .tag.m{color:var(--green);border-color:var(--green)}
+nav{border-bottom:1px solid var(--line);background:var(--bg);
+position:sticky;top:0;z-index:5}
+.navin{display:flex;align-items:center;justify-content:space-between;
+padding:12px 20px;font-size:14px}
+.brand{font:13px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}
+.navlinks a{margin-left:18px;text-decoration:none;color:var(--muted)}
+.navlinks a:hover{color:var(--ink)}
+.cta{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0 10px}
+.btn{display:inline-block;padding:11px 18px;border-radius:8px;font-size:14px;
+font-weight:600;text-decoration:none;border:1px solid var(--line);color:var(--ink)}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+.btn.primary:hover{filter:brightness(1.08)}
+.fine{font-size:13px}
 footer{margin:56px 0 40px;padding-top:22px;border-top:1px solid var(--line);
 font-size:14px;color:var(--muted)}
 img{max-width:100%;border-radius:10px;border:1px solid var(--line);margin:8px 0}
 </style>
 </head>
 <body>
+<nav>
+<div class="wrap navin">
+<span class="brand">hardware-aware-gateway</span>
+<span class="navlinks">
+<a href="https://github.com/Rahu378/hardware-aware-gateway/releases/tag/v1.0.0">v1.0.0</a>
+<a href="https://github.com/Rahu378/hardware-aware-gateway">GitHub</a>
+</span>
+</div>
+</nav>
 <div class="wrap">
 
 <header>
@@ -104,7 +142,7 @@ datasheet figures and are labelled so.</p>
 </div>
 <div>
 <label for="disp">Op dispatches per token</label>
-<input type="range" id="disp" min="0" max="12000" step="250" value="6130"
+<input type="range" id="disp" min="0" max="12000" step="10" value="6130"
  autocomplete="off">
 <div class="val" id="dispval"></div>
 </div>
@@ -134,11 +172,21 @@ the one most people reach for first.</p>
 <table id="devtable"></table>
 
 <h2>Running it yourself</h2>
-<p>Both bootstrap notebooks run the whole pipeline on a free T4 in about ten
-minutes and write every number in these charts.
-<code>demos/gradio_app.py</code> streams eager against graphed decode side by
-side with live counters; it needs a GPU, so run it from a notebook with
-<code>--share</code>.</p>
+<p>The notebook runs the whole pipeline on a free T4 in about ten minutes and
+writes every number on this page: correctness, the op sweep, the profile, the
+end-to-end benchmark and the CUDA graph capture. Nothing here is a figure you
+have to take on trust.</p>
+<div class="cta">
+<a class="btn primary"
+ href="https://colab.research.google.com/github/Rahu378/hardware-aware-gateway/blob/main/notebooks/colab_bootstrap.ipynb">
+Open in Colab &rarr;</a>
+<a class="btn" href="https://github.com/Rahu378/hardware-aware-gateway">View on GitHub</a>
+<a class="btn" href="https://github.com/Rahu378/hardware-aware-gateway/releases/tag/v1.0.0">
+Read the write-up</a>
+</div>
+<p class="fine">Prefer Kaggle: its GPU quota is larger and the machine is
+quieter. The same benchmark measured a standard deviation of 0.53 tok/s there
+against 3.68 on Colab, which decided whether an effect resolved at all.</p>
 
 <footer>
 Generated by <code>python -m hag.site</code> from the JSON in
