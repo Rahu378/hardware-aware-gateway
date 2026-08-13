@@ -248,6 +248,20 @@ is close to meaningless on the other, so it is measured rather than assumed.
 For decode, `hag.graphs.GraphedDecoder` replays a captured CUDA graph and is
 worth considerably more than either kernel.
 
+## Interactive explorer
+
+**[rahu378.github.io/hardware-aware-gateway](https://rahu378.github.io/hardware-aware-gateway/)**
+
+Pick a device, a model size, and a precision, and it says whether decode is
+limited by streaming weights or by the CPU issuing work, and what to do about
+each. The constants come from the runs in `results/`, and the model reproduces
+the measured configuration to within 7% on eager and 2% on graphed decode.
+
+It is a calculator, not a hosted benchmark. A browser cannot run a CUDA kernel,
+so anything claiming to run one live would be replaying a recording. Devices
+that were actually benchmarked are marked as measured; the rest carry datasheet
+figures and say so.
+
 ## Interactive demo
 
 [`demos/gradio_app.py`](demos/gradio_app.py) streams eager PyTorch and graphed
