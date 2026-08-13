@@ -250,8 +250,7 @@ worth considerably more than either kernel.
 
 ## The write-up
 
-[**The Fastest Code I Wrote Last Week Was the Code I Didn't Write**](https://rahu378.github.io/hardware-aware-gateway/article.html)
-([markdown source](docs/ARTICLE.md))
+[**The Fastest Code I Wrote Last Week Was the Code I Didn't Write**](docs/ARTICLE.md)
 is the narrative version: what was built, what regressed, and the two
 optimisations that were cancelled by arithmetic before anyone wrote them. It
 assumes no GPU background and is the best starting point if you want the story
