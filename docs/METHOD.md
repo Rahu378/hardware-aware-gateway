@@ -107,6 +107,20 @@ Worked example from this repo, five repeats on a Colab T4: paired differences of
 t = 1.18 against a critical value of 2.776. The median ratio was 1.079x, which
 would have looked perfectly quotable and meant nothing.
 
+### The instrument, not the sample size
+
+Sixteen repeats on Colab still could not resolve that effect, and the test
+suggested more. The same benchmark on a Kaggle T4, same model and same code,
+gave a standard deviation of **0.53** against Colab's **3.68**, and the effect
+came out at t = 9.81 immediately.
+
+So the answer was never more samples. Colab's shared VM has a bimodal
+throughput distribution, clustering near 26 and near 30 tokens/sec on identical
+code, and averaging over an unstable instrument does not make it stable. When a
+paired test keeps failing and the required repeat count keeps growing, suspect
+the machine before the statistics. Measuring somewhere quieter fixed in one run
+what three runs of resampling could not.
+
 ## Prefill and decode are different machines
 
 They are reported separately throughout because they behave nothing alike:
@@ -179,3 +193,7 @@ The benchmark refuses to report a speedup until the first comparison passes.
 - CUDA graphs have no Apple silicon counterpart in this repo. Metal exposes no
   comparable capture API through MLX, so that comparison stops at the NVIDIA
   side rather than spanning both.
+- The graphed benchmark times its eager baseline under `no_grad` to match the
+  graphed path. An `inference_mode` baseline is roughly 10% faster and would
+  give a smaller ratio. That difference is not measurement error; it is the
+  dispatch cost this whole section is about, showing up a second way.

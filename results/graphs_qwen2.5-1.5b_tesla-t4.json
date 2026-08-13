@@ -1,0 +1,88 @@
+{
+  "generated_utc": "2026-08-13T21:35:58+00:00",
+  "device": {
+    "backend": "cuda",
+    "device_name": "Tesla T4",
+    "spec": {
+      "name": "NVIDIA T4",
+      "peak_bandwidth_gbs": 320.0,
+      "peak_tflops_fp16": 65.0,
+      "memory_gb": 16.0,
+      "source": "NVIDIA T4 datasheet"
+    },
+    "platform": "Linux-6.12.90+-x86_64-with-glibc2.35"
+  },
+  "model": "Qwen/Qwen2.5-1.5B",
+  "dtype": "fp16",
+  "prompt_tokens": 512,
+  "new_tokens": 128,
+  "repeats": 8,
+  "verification": {
+    "match": true,
+    "tokens": 16,
+    "graph_first_divergence": null,
+    "static_cache_first_divergence": null,
+    "graphed_head": [
+      1812,
+      220,
+      16,
+      15,
+      15,
+      15,
+      15,
+      15
+    ],
+    "static_eager_head": [
+      1812,
+      220,
+      16,
+      15,
+      15,
+      15,
+      15,
+      15
+    ],
+    "dynamic_eager_head": [
+      1812,
+      220,
+      16,
+      15,
+      15,
+      15,
+      15,
+      15
+    ]
+  },
+  "eager": {
+    "median": 28.011,
+    "min": 27.667,
+    "max": 28.312,
+    "samples": 8
+  },
+  "graphed": {
+    "median": 48.069,
+    "min": 47.316,
+    "max": 48.67,
+    "samples": 8
+  },
+  "speedup": 1.7161,
+  "paired": {
+    "samples": 8,
+    "mean_diff": 20.0405,
+    "sd_diff": 0.5522,
+    "t": 102.647,
+    "t_crit_95": 2.365,
+    "resolved": true,
+    "repeats_needed_estimate": 1,
+    "diffs": [
+      20.559,
+      20.592,
+      20.068,
+      19.148,
+      19.401,
+      19.744,
+      20.416,
+      20.397
+    ]
+  }
+}

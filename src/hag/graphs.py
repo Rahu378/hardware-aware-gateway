@@ -101,7 +101,7 @@ class GraphedDecoder:
         self.static_input_ids = torch.zeros((1, 1), dtype=torch.long, device=device)
         self.static_cache_position = torch.zeros((1,), dtype=torch.long, device=device)
 
-    # -- eager paths ------------------------------------------------------
+    # ---- eager paths ----------------------------------------------------
 
     def _forward(self):
         return self.model(
@@ -130,7 +130,7 @@ class GraphedDecoder:
         self._next_position = n
         return out.logits[:, -1:].argmax(dim=-1)
 
-    # -- capture and replay ----------------------------------------------
+    # ---- capture and replay ---------------------------------------------
 
     def capture(self) -> GraphStats:
         """Warm up on a side stream, then capture one decode step.

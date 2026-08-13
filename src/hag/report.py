@@ -105,7 +105,7 @@ def load_graphs(results_dir: Path) -> list[dict]:
     return [json.loads(p.read_text()) for p in sorted(results_dir.glob("graphs_*.json"))]
 
 
-def _graphs_section(runs: list[dict]) -> str:
+def _graphs_section(runs: list[dict], predicted_gap_ms: float | None = None) -> str:
     """CUDA graph replay: the fix the roofline actually pointed at."""
     if not runs:
         return ""
@@ -131,15 +131,31 @@ def _graphs_section(runs: list[dict]) -> str:
     v = best.get("verification", {})
     eager_ms = 1e3 / best["eager"]["median"]
     graph_ms = 1e3 / best["graphed"]["median"]
+    recovered = eager_ms - graph_ms
+
+    # The predicted gap comes from the roofline rather than a constant. It was
+    # hardcoded once and immediately went stale when a rerun measured 17.4
+    # instead of 17.8, which is the drift these generated tables exist to stop.
+    if predicted_gap_ms:
+        claim = (
+            f"It put {best['device']['device_name']} decode at "
+            f"{predicted_gap_ms:.1f} ms per token of CPU dispatch and said no "
+            f"kernel could reach that. Replaying a captured graph moved a token "
+            f"from {eager_ms:.1f} ms to {graph_ms:.1f} ms, recovering "
+            f"{recovered:.1f} ms, or {100 * recovered / predicted_gap_ms:.0f}% of "
+            "the predicted gap."
+        )
+    else:
+        claim = (
+            f"Replaying a captured graph moved a token from {eager_ms:.1f} ms to "
+            f"{graph_ms:.1f} ms, recovering {recovered:.1f} ms."
+        )
     note = (
-        f"\n**The roofline predicted this before the code was written.** It put "
-        f"{best['device']['device_name']} decode at 17.8 ms per token of CPU "
-        "dispatch against 14.7 ms of kernel time, and said no kernel could reach "
-        f"that. Replaying a captured graph moved a token from {eager_ms:.1f} ms to "
-        f"{graph_ms:.1f} ms, recovering {eager_ms - graph_ms:.1f} ms, or "
-        f"{100 * (eager_ms - graph_ms) / 17.8:.0f}% of the predicted gap. That is "
-        "the same analysis which cancelled the GEMV kernel, and the reason to "
-        "trust a prediction is that it was made in advance and in units.\n\n"
+        "\n**The roofline predicted this before the code was written.** "
+        + claim
+        + " That is the same analysis which cancelled the GEMV kernel, and the "
+        "reason to trust a prediction is that it was made in advance and in "
+        "units.\n\n"
         "Correctness first: the graphed decoder emits token-for-token identical "
         f"output to eager over the first {v.get('tokens', '?')} tokens. Greedy "
         "decoding is deterministic, so this is exact-match, not tolerance. A "
@@ -152,6 +168,20 @@ def _graphs_section(runs: list[dict]) -> str:
         "way.\n"
     )
     return "### CUDA graphs: replaying the decode step\n\n" + "\n".join(lines) + "\n" + note
+
+
+def _predicted_gap_ms(repo: Path, runs: list[dict], e2e: list[dict]) -> float | None:
+    """The CPU dispatch gap the roofline measured, for the graphs section to score against."""
+    from . import roofline
+
+    prof = load_profile(repo)
+    if not prof:
+        return None
+    dev = prof.get("device", {}).get("device_name")
+    ops = next((r for r in runs if r["device"]["device_name"] == dev), {})
+    end = next((r for r in e2e if r["device"]["device_name"] == dev), {})
+    a = roofline.analyse(prof, end, ops) or {}
+    return a.get("cpu_gap_ms_per_token")
 
 
 def load_profile(repo: Path) -> dict | None:
@@ -600,7 +630,7 @@ def render(
         _e2e_table(e2e),
         "",
         _e2e_verdict(e2e, prof),
-        _graphs_section(graphs),
+        _graphs_section(graphs, _predicted_gap_ms(REPO, runs, e2e)),
         _peak_caveat(runs),
         _dispatch_bound_note(runs),
         END,
