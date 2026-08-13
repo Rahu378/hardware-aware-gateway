@@ -116,6 +116,62 @@ def analyse(profile: dict, e2e: dict, ops: dict) -> dict | None:
     return out
 
 
+#: Request shapes to score prefill capture against. Chosen to span the range
+#: where the answer might plausibly differ: chat, RAG, and summarisation.
+WORKLOADS = ((128, 128), (512, 128), (2048, 128), (4096, 50), (8192, 50))
+
+
+def prefill_capture_value(profile: dict, e2e: dict, us_per_dispatch: float) -> dict | None:
+    """What capturing prefill into a CUDA graph would be worth.
+
+    This cancelled the work, the same way the roofline cancelled the GEMV, and
+    for a sharper reason. Dispatch overhead per forward pass is *fixed*: the
+    same op count runs whatever the sequence length, because the ops are the
+    same and only the tensors get bigger. Prefill compute, meanwhile, scales
+    with length.
+
+    So the two ends squeeze it. At a short prompt the overhead is a large share
+    of prefill and the speedup looks good, but prefill is a few percent of the
+    request. At a long prompt prefill dominates the request, but the fixed
+    overhead has become a rounding error against it. There is no prompt length
+    where both are true, and the request-level speedup lands near 1.006x
+    everywhere.
+
+    Decode had the opposite shape, which is why capturing it was worth 1.72x:
+    the same fixed overhead against a step that does one token of work.
+    """
+    dispatches = profile.get("dispatches_per_forward")
+    base = e2e.get("baseline") or {}
+    prefill_ms = (base.get("prefill_s") or 0) * 1000
+    prefill_tokens = base.get("prefill_tokens")
+    decode_ms = 1e3 / base["decode_tok_per_s"] if base.get("decode_tok_per_s") else None
+    if not all((dispatches, prefill_ms, prefill_tokens, decode_ms)):
+        return None
+
+    overhead_ms = dispatches * us_per_dispatch / 1000
+    work_per_token = (prefill_ms - overhead_ms) / prefill_tokens
+    rows = []
+    for n_in, n_out in WORKLOADS:
+        pre = work_per_token * n_in + overhead_ms
+        total = pre + n_out * decode_ms
+        rows.append(
+            {
+                "prompt_tokens": n_in,
+                "output_tokens": n_out,
+                "prefill_ms": round(pre, 1),
+                "overhead_share_of_prefill": round(overhead_ms / pre, 3),
+                "prefill_speedup": round(pre / (pre - overhead_ms), 3),
+                "request_speedup": round(total / (total - overhead_ms), 4),
+            }
+        )
+    return {
+        "fixed_dispatch_overhead_ms": round(overhead_ms, 1),
+        "dispatches_per_forward": dispatches,
+        "best_request_speedup": max(r["request_speedup"] for r in rows),
+        "workloads": rows,
+    }
+
+
 def _load(path: Path) -> dict:
     return json.loads(path.read_text()) if path.exists() else {}
 
@@ -136,6 +192,10 @@ def main() -> None:
     ops = next((_load(p) for p in results.glob("ops_*.json") if dev in p.name), {})
 
     report = analyse(profile, e2e, ops)
+    if report and report.get("implied_us_per_dispatch"):
+        pc = prefill_capture_value(profile, e2e, report["implied_us_per_dispatch"])
+        if pc:
+            report["prefill_capture_value"] = pc
     if report is None:
         raise SystemExit(
             "Not enough data. Needs a GPU profile plus matching ops and e2e runs "

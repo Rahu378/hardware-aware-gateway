@@ -16,6 +16,7 @@ dependencies = ["torch>=2.4", "numpy>=1.24"]
 # Model weights and the HF stack, only needed for the end-to-end benchmark.
 e2e = ["transformers>=4.44", "accelerate>=0.33", "sentencepiece>=0.2"]
 dev = ["pytest>=8.0", "ruff>=0.6"]
+charts = ["matplotlib>=3.8"]
 
 [project.urls]
 Repository = "https://github.com/Rahu378/hardware-aware-gateway"

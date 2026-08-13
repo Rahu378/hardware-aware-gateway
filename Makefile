@@ -3,7 +3,7 @@
 PY := .venv/bin/python
 PIP := .venv/bin/pip
 
-.PHONY: setup test bench bench-e2e report report-check profile profile-nsys clean
+.PHONY: setup test bench bench-e2e charts report report-check profile profile-nsys clean
 
 setup:                ## create the venv and install everything
 	python3 -m venv .venv
@@ -18,6 +18,9 @@ bench: test           ## op-level sweep -> results/ops_*.json
 
 bench-e2e:            ## tokens/sec + memory -> results/e2e_*.json
 	$(PY) -m hag.bench_e2e --model $(or $(MODEL),Qwen/Qwen2.5-0.5B)
+
+charts:               ## regenerate docs/img/*.svg from results/
+	$(PY) -m hag.charts
 
 report:               ## regenerate the README tables from results/
 	$(PY) -m hag.report
