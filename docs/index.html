@@ -75,6 +75,20 @@ padding:12px 20px;font-size:14px}
 .brand{font:13px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}
 .navlinks a{margin-left:18px;text-decoration:none;color:var(--muted)}
 .navlinks a:hover{color:var(--ink)}
+.race{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media(max-width:640px){.race{grid-template-columns:1fr}}
+.lane{border:1px solid var(--line);border-radius:9px;padding:14px;background:var(--bg)}
+.lanehead{display:flex;justify-content:space-between;align-items:baseline;
+gap:10px;font-size:13px;font-weight:600;margin-bottom:10px}
+.rate{font-size:12px;font-weight:600;color:var(--muted);
+font-variant-numeric:tabular-nums}
+.lane.done .rate{color:var(--green)}
+.stream{margin:0;min-height:7.2em;font-size:14px;line-height:1.6;color:var(--ink)}
+.stream::after{content:"8a";color:var(--blue);opacity:0}
+.lane.running .stream::after{opacity:1;animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{opacity:0}}
+@media(prefers-reduced-motion:reduce){.lane.running .stream::after{animation:none}}
+.racefoot{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:16px}
 .cta{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0 10px}
 .btn{display:inline-block;padding:11px 18px;border-radius:8px;font-size:14px;
 font-weight:600;text-decoration:none;border:1px solid var(--line);color:var(--ink)}
@@ -157,6 +171,35 @@ datasheet figures and are labelled so.</p>
 <div class="verdict" id="verdict"></div>
 <p id="detail"></p>
 </div>
+
+<h2>Watch the difference</h2>
+<p>Both sides generate the same text with the same weights, one word at a time.
+The left issues about six thousand instructions per word; the right replays a
+recording of them. Paced by the measured token rates, so what you are watching
+is the real difference in speed rather than a guess at it.</p>
+
+<div class="card">
+<div class="race">
+  <div class="lane">
+    <div class="lanehead"><span>Eager PyTorch</span>
+      <span class="rate mono" id="rateA">idle</span></div>
+    <p class="stream" id="outA"></p>
+  </div>
+  <div class="lane">
+    <div class="lanehead"><span>CUDA graph replay</span>
+      <span class="rate mono" id="rateB">idle</span></div>
+    <p class="stream" id="outB"></p>
+  </div>
+</div>
+<div class="racefoot">
+  <button id="run" class="btn primary">Run both &rarr;</button>
+  <span class="fine mono" id="result"></span>
+</div>
+</div>
+<p class="fine">An animation paced by measured throughput, not a model running in
+your browser. The real side-by-side is <code>demos/gradio_app.py</code>, which
+needs a GPU. Identical output is the point: the recording must not change a
+single word, and the benchmark refuses to report a speed until it does not.</p>
 
 <h2>What that means</h2>
 <p>Slide dispatches to zero: that is a perfectly captured CUDA graph. Slide
@@ -300,6 +343,56 @@ tbl.innerHTML = "<tr><th>device</th><th>measured bandwidth</th>"
       + "<td>" + (d.measured
           ? "<span class='tag m'>measured</span>"
           : "<span class='tag'>datasheet</span>") + "</td></tr>").join("");
+
+// --- side-by-side race, paced by the measured token rates ----------------
+(function(){
+  const WORDS = ("Decode is not a compute problem. At batch size one the "
+    + "arithmetic finishes long before the weights arrive, so the card spends "
+    + "most of its time waiting on memory and on the processor that feeds it "
+    + "work one instruction at a time.").split(" ");
+  const A = 1000 / DATA.measured.eager_tok_s;    // ms per word, eager
+  const B = 1000 / DATA.measured.graphed_tok_s;  // ms per word, graphed
+  const btn = $("run");
+  let running = false;
+
+  function lane(outId, rateId, msPerWord, done){
+    const out = $(outId), rate = $(rateId), box = out.parentElement;
+    out.textContent = ""; box.className = "lane running"; rate.textContent = "0.0 w/s";
+    let i = 0; const t0 = performance.now();
+    function step(now){
+      const due = Math.min(WORDS.length, Math.floor((now - t0) / msPerWord) + 1);
+      if (due > i){
+        out.textContent = WORDS.slice(0, due).join(" ");
+        const secs = (now - t0) / 1000;
+        rate.textContent = (due / secs).toFixed(1) + " w/s";
+        i = due;
+      }
+      if (i < WORDS.length) requestAnimationFrame(step);
+      else {
+        const secs = (performance.now() - t0) / 1000;
+        box.className = "lane done";
+        rate.textContent = (WORDS.length / secs).toFixed(1) + " w/s  " + secs.toFixed(2) + "s";
+        done(secs);
+      }
+    }
+    requestAnimationFrame(step);
+  }
+
+  btn.addEventListener("click", function(){
+    if (running) return;
+    running = true; btn.disabled = true; $("result").textContent = "";
+    let a = null, b = null;
+    const finish = () => {
+      if (a === null || b === null) return;
+      $("result").textContent = "same " + WORDS.length + " words: "
+        + a.toFixed(2) + "s against " + b.toFixed(2) + "s, "
+        + (a/b).toFixed(2) + "x";
+      running = false; btn.disabled = false;
+    };
+    lane("outA","rateA",A,s => { a = s; finish(); });
+    lane("outB","rateB",B,s => { b = s; finish(); });
+  });
+})();
 
 ["dev","params","bits","disp"].forEach(id => {
   $(id).addEventListener("input", render);
