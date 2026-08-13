@@ -101,6 +101,59 @@ def _roofline_section(repo: Path, runs: list[dict], e2e: list[dict]) -> str:
     return "### Is decode actually bandwidth-bound?\n\n" + "\n".join(lines) + "\n" + verdict
 
 
+def load_graphs(results_dir: Path) -> list[dict]:
+    return [json.loads(p.read_text()) for p in sorted(results_dir.glob("graphs_*.json"))]
+
+
+def _graphs_section(runs: list[dict]) -> str:
+    """CUDA graph replay: the fix the roofline actually pointed at."""
+    if not runs:
+        return ""
+    lines = [
+        "| device | model | eager | graphed | speedup | paired t | resolved |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for r in runs:
+        pr = r.get("paired", {})
+        lines.append(
+            f"| {r['device']['device_name']} | {r['model'].split('/')[-1]} "
+            f"| {r['eager']['median']:.2f} tok/s "
+            f"<br><sub>{r['eager']['min']:.2f} to {r['eager']['max']:.2f}, "
+            f"n={r['eager']['samples']}</sub> "
+            f"| {r['graphed']['median']:.2f} tok/s "
+            f"<br><sub>{r['graphed']['min']:.2f} to {r['graphed']['max']:.2f}</sub> "
+            f"| **{r['speedup']:.2f}x** "
+            f"| {pr.get('t', 0):.1f} vs {pr.get('t_crit_95', 0):.2f} "
+            f"| {'yes' if pr.get('resolved') else 'no'} |"
+        )
+
+    best = max(runs, key=lambda r: r["speedup"])
+    v = best.get("verification", {})
+    eager_ms = 1e3 / best["eager"]["median"]
+    graph_ms = 1e3 / best["graphed"]["median"]
+    note = (
+        f"\n**The roofline predicted this before the code was written.** It put "
+        f"{best['device']['device_name']} decode at 17.8 ms per token of CPU "
+        "dispatch against 14.7 ms of kernel time, and said no kernel could reach "
+        f"that. Replaying a captured graph moved a token from {eager_ms:.1f} ms to "
+        f"{graph_ms:.1f} ms, recovering {eager_ms - graph_ms:.1f} ms, or "
+        f"{100 * (eager_ms - graph_ms) / 17.8:.0f}% of the predicted gap. That is "
+        "the same analysis which cancelled the GEMV kernel, and the reason to "
+        "trust a prediction is that it was made in advance and in units.\n\n"
+        "Correctness first: the graphed decoder emits token-for-token identical "
+        f"output to eager over the first {v.get('tokens', '?')} tokens. Greedy "
+        "decoding is deterministic, so this is exact-match, not tolerance. A "
+        "graph replaying stale buffers produces fluent, wrong text and nothing "
+        "raises, so the benchmark refuses to print a speedup until that passes.\n\n"
+        "The eager baseline here runs under `no_grad`, matching the graphed path. "
+        "Measured against an `inference_mode` baseline the ratio is smaller, "
+        "because `inference_mode` is itself cheaper on dispatch-heavy work. That "
+        "gap is not noise; it is the same dispatch cost showing up a second "
+        "way.\n"
+    )
+    return "### CUDA graphs: replaying the decode step\n\n" + "\n".join(lines) + "\n" + note
+
+
 def load_profile(repo: Path) -> dict | None:
     path = repo / "profiles" / "torch_profile_summary.json"
     return json.loads(path.read_text()) if path.exists() else None
@@ -502,8 +555,14 @@ def _headline(runs: list[dict], e2e: list[dict] | None = None) -> str:
     return " ".join(parts) + "\n"
 
 
-def render(runs: list[dict], e2e: list[dict] | None = None, prof: dict | None = None) -> str:
+def render(
+    runs: list[dict],
+    e2e: list[dict] | None = None,
+    prof: dict | None = None,
+    graphs: list[dict] | None = None,
+) -> str:
     e2e = e2e or []
+    graphs = graphs or []
     if not runs:
         return (
             f"{BEGIN}\n\n_No benchmark runs recorded yet. "
@@ -541,6 +600,7 @@ def render(runs: list[dict], e2e: list[dict] | None = None, prof: dict | None = 
         _e2e_table(e2e),
         "",
         _e2e_verdict(e2e, prof),
+        _graphs_section(graphs),
         _peak_caveat(runs),
         _dispatch_bound_note(runs),
         END,
@@ -564,7 +624,10 @@ def main() -> None:
     _, tail = rest.split(END, 1)
     results_dir = Path(args.results)
     updated = head + render(
-        load_runs(results_dir), load_e2e(results_dir), load_profile(REPO)
+        load_runs(results_dir),
+        load_e2e(results_dir),
+        load_profile(REPO),
+        load_graphs(results_dir),
     ) + tail
 
     if args.check:

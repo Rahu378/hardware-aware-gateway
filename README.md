@@ -145,6 +145,7 @@ Baseline and fused are measured adjacently within each repeat, so the paired dif
 The op-level tables above do not have this problem. They use `triton.testing.do_bench` over 100 replicates with an L2 flush between them, and the kernel results there are solid. Reporting a headline speedup this benchmark cannot distinguish from noise would undo that.
 
 
+
 **On the `vs copy` column reading above 100%.** The reference is a device-to-device copy, which moves one read per write. `swiglu` moves two reads per write, and DRAM sustains reads better than writes, so a 2:1 kernel legitimately exceeds a 1:1 copy. The copy figure is a reference point, not a ceiling. `% of datasheet` is the honest wall, and nothing here passes it.
 
 
