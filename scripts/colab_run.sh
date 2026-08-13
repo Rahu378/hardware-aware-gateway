@@ -30,17 +30,20 @@ MODEL="${HAG_MODEL:-Qwen/Qwen2.5-1.5B}"
 # Colab writes to /content, Kaggle to /kaggle/working, and anything else gets
 # the home directory. Kaggle matters because its free GPU quota is separate from
 # Colab's, so hitting the limit on one does not block the other.
+# Kaggle is checked first because a Kaggle image can also have /content, and
+# matching Colab there would write the archive somewhere the Output panel does
+# not show. Test for the more specific platform before the more general one.
 if [ -n "${HAG_WORK:-}" ]; then
-    BASE="$(dirname "$HAG_WORK")"; WORK="$HAG_WORK"
-elif [ -d /content ]; then
-    BASE=/content; WORK=/content/hag-run
+    BASE="$(dirname "$HAG_WORK")"; WORK="$HAG_WORK"; PLATFORM=explicit
 elif [ -d /kaggle/working ]; then
-    BASE=/kaggle/working; WORK=/kaggle/working/hag-run
+    BASE=/kaggle/working; WORK=/kaggle/working/hag-run; PLATFORM=kaggle
+elif [ -d /content ]; then
+    BASE=/content; WORK=/content/hag-run; PLATFORM=colab
 else
-    BASE="$HOME"; WORK="$HOME/hag-run"
+    BASE="$HOME"; WORK="$HOME/hag-run"; PLATFORM=generic
 fi
 ARCHIVE="$BASE/artifacts.zip"
-echo "workdir: $WORK"
+echo "platform: $PLATFORM   workdir: $WORK"
 
 # Check for a GPU before doing anything else. Without this the script clones,
 # installs, silently skips all fifty GPU tests, and only fails two minutes later
@@ -121,6 +124,9 @@ ls -la "$WORK/results"
 cd "$WORK" && zip -qr "$ARCHIVE" results profiles
 echo
 echo "Archive: $ARCHIVE"
+if [ "$PLATFORM" = "kaggle" ]; then
+    echo "On Kaggle: find it in the Output panel on the right sidebar."
+fi
 if [ "$GRAPHS_OK" = "1" ]; then
     echo "Every step succeeded."
 else
