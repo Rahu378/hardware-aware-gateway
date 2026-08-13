@@ -124,51 +124,17 @@ def _reset_peak_memory(backend: str) -> None:
 
 
 def patch_model(model, backend: str) -> list[str]:
-    """Swap the fused kernels into a HuggingFace Llama-family model in place.
+    """Swap the fused kernels in. Thin wrapper over the public `hag.patch`.
 
-    Returns the list of modules actually patched, so the report can state what
-    was and was not replaced rather than implying whole-model coverage.
+    The patching loop used to live here, which meant the only way to use the
+    kernels in your own code was to read the benchmark and copy it out.
     """
     if backend != "cuda":
         return []
 
-    import torch
+    from .integrate import patch
 
-    from .kernels.triton import rmsnorm as tri_rmsnorm
-    from .kernels.triton import swiglu as tri_swiglu
-
-    patched: list[str] = []
-
-    for module in model.modules():
-        cls = type(module).__name__
-
-        if cls.endswith("RMSNorm") and hasattr(module, "weight"):
-            eps = getattr(module, "variance_epsilon", getattr(module, "eps", 1e-6))
-
-            def rms_forward(self, hidden_states, _eps=eps):
-                return tri_rmsnorm.rmsnorm(hidden_states, self.weight, _eps)
-
-            module.forward = rms_forward.__get__(module, type(module))
-            patched.append(f"{cls}.forward -> triton.rmsnorm")
-
-        elif cls.endswith("MLP") and all(
-            hasattr(module, p) for p in ("gate_proj", "up_proj", "down_proj")
-        ):
-
-            def mlp_forward(self, x):
-                # The dispatching entry point, not the raw kernel: below
-                # SWIGLU_MIN_ROWS this falls back to eager, which is what keeps
-                # the prefill win without paying the decode penalty.
-                return self.down_proj(tri_swiglu.swiglu(self.gate_proj(x), self.up_proj(x)))
-
-            module.forward = mlp_forward.__get__(module, type(module))
-            patched.append(
-                f"{cls}.forward -> triton.swiglu (fused at >= "
-                f"{tri_swiglu.SWIGLU_MIN_ROWS} rows)"
-            )
-
-    del torch
-    return patched
+    return patch(model).replaced
 
 
 def run_once(model, tokenizer, backend: str, prompt_tokens: int, new_tokens: int) -> dict:

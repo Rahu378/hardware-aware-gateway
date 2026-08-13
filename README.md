@@ -228,6 +228,38 @@ scripts/
 docs/METHOD.md          how every number was produced
 ```
 
+## Using the kernels in your own code
+
+```python
+import hag
+from transformers import AutoModelForCausalLM
+
+model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-1.5B").cuda()
+hag.patch(model)          # fused RMSNorm and SwiGLU, reversible
+hag.calibrate()           # measure this device's fusion crossover
+```
+
+`hag.patch` returns a report of what it replaced rather than mutating silently,
+and `hag.unpatch` puts it back. `hag.calibrate` matters more than it looks: the
+fusion threshold is the row count where traffic saved beats launch cost, and
+launch cost spans 6 us on a T4 to 179 us on an M3. A threshold calibrated on one
+is close to meaningless on the other, so it is measured rather than assumed.
+
+For decode, `hag.graphs.GraphedDecoder` replays a captured CUDA graph and is
+worth considerably more than either kernel.
+
+## Interactive demo
+
+[`demos/gradio_app.py`](demos/gradio_app.py) streams eager PyTorch and graphed
+decode side by side on the same prompt, with live throughput counters. Both
+panes emit identical tokens, so the speedup is something you watch rather than
+read.
+
+It needs a CUDA GPU and there is deliberately no hosted version: the demo is a
+live measurement, and a screenshot of a throughput counter is a picture of a
+number rather than the number. Run it from either bootstrap notebook with
+`--share` for a public URL.
+
 ## Running it
 
 ```bash
