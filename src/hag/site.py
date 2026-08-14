@@ -109,6 +109,23 @@ HTML = """<!doctype html>
 <title>Inference roofline explorer &mdash; Hardware-Aware Gateway</title>
 <meta name="description" content="Is LLM decode limited by memory bandwidth
 or by CPU dispatch? A calculator anchored on measured data.">
+
+<!-- Without these, the link renders as a blank grey card everywhere it is
+     shared. The cover is the one image that states the finding on its own. -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="Is your decode limited by bandwidth, or by the CPU?">
+<meta property="og:description" content="On a Tesla T4 the GPU sat idle for 54% of
+every token while the CPU issued six thousand instructions. Pick a device and a
+model and see which wall you are against.">
+<meta property="og:url" content="https://rahu378.github.io/hardware-aware-gateway/">
+<meta property="og:image" content="https://rahu378.github.io/hardware-aware-gateway/img/cover.png">
+<meta property="og:image:width" content="2572">
+<meta property="og:image:height" content="1245">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Is your decode limited by bandwidth, or by the CPU?">
+<meta name="twitter:description" content="The GPU was idle 54% of every token.
+No faster kernel fixes that.">
+<meta name="twitter:image" content="https://rahu378.github.io/hardware-aware-gateway/img/cover.png">
 <style>
 :root{--ink:#12161c;--muted:#5b6572;--line:#e3e7ec;--bg:#fff;--card:#f7f9fb;
 --blue:#2563eb;--grey:#9ca3af;--red:#dc2626;--green:#059669;--track:#cbd3dc;}
