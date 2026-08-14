@@ -20,6 +20,8 @@ I measured the chef. The chef was already moving at 87% of what physics allows.
 
 The fix was to hand the chef the entire recipe on one page, once, and never speak again.
 
+Those kitchen numbers are not invented. They are the real measurements slowed down about a thousand times so a human can watch them: three milliseconds per slip is 2.84 microseconds, fifteen seconds of cooking is 14.6 milliseconds, thirty-three seconds is 32.0. The proportions are the machine's, not mine.
+
 ---
 
 ## What this actually was

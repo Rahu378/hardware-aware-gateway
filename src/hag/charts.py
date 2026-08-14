@@ -93,23 +93,31 @@ def chart_where_the_time_goes(plt, profile: dict, e2e: dict, graphs: dict) -> Pa
     graph_total = 1e3 / graphs["graphed"]["median"]
     floor = a["bandwidth_floor_ms_per_token"]
 
+    # Three segments, because two were wrong. The residual above the GEMV is
+    # not all idle time: about 6 ms of it is other GPU work (norms, activations,
+    # attention, cache writes) that the graph does not remove. Lumping that in
+    # with the idle gap and colouring it "waiting" overstated what capture won.
+    other_gpu = graph_total - kernel
+    idle = [0.0, eager_total - graph_total]
+
     fig, ax = plt.subplots(figsize=(7.6, 3.2))
     # Reversed so the "before" row reads above the "after" row.
     labels = ["CUDA graph", "eager"]
     totals = [graph_total, eager_total]
     kernels = [kernel, kernel]
-    gaps = [t - kernel for t in totals]
 
-    ax.barh(labels, kernels, color=BLUE, height=0.45, label="GPU kernel time")
-    ax.barh(labels, gaps, left=kernels, color=GREY, height=0.45,
-            label="CPU dispatch, GPU idle")
+    ax.barh(labels, kernels, color=BLUE, height=0.45, label="weight streaming")
+    ax.barh(labels, [other_gpu, other_gpu], left=kernels, color="#7ba7f0",
+            height=0.45, label="other GPU work")
+    ax.barh(labels, idle, left=[kernel + other_gpu] * 2, color=GREY,
+            height=0.45, label="GPU idle, waiting on the CPU")
     ax.axvline(floor, color=RED, lw=1.4, ls="--")
     ax.text(floor + 0.5, 1.62, f"bandwidth floor {floor:.1f} ms",
             color=RED, fontsize=8.5, va="center")
 
-    for y, (t, k) in enumerate(zip(totals, kernels, strict=True)):
+    for y, t in enumerate(totals):
         ax.text(t + 0.6, y, f"{t:.1f} ms", va="center", fontsize=10, color=INK)
-        ax.text(k / 2, y, f"{k:.1f}", va="center", ha="center",
+        ax.text(kernel / 2, y, f"{kernel:.1f}", va="center", ha="center",
                 fontsize=8.5, color="white")
 
     ax.set_xlim(0, eager_total * 1.2)
@@ -122,7 +130,7 @@ def chart_where_the_time_goes(plt, profile: dict, e2e: dict, graphs: dict) -> Pa
         fontsize=10.5, loc="left", pad=14,
     )
     # Below the axes: inside them it sat on top of the eager bar.
-    ax.legend(frameon=False, fontsize=8.5, ncols=2,
+    ax.legend(frameon=False, fontsize=8.5, ncols=3,
               loc="upper center", bbox_to_anchor=(0.5, -0.26))
     ax.grid(axis="y", visible=False)
     fig.tight_layout()
@@ -224,6 +232,70 @@ def chart_launch_floor(plt, ops_runs: list[dict]) -> Path | None:
     return path
 
 
+def chart_cover(plt, profile: dict, e2e: dict, graphs: dict) -> Path | None:
+    """A wide banner for the write-up's cover slot.
+
+    Social cards and article headers crop hard, usually to about 2:1, so this is
+    composed to survive that: the claim and the two bars sit inside the middle
+    band and nothing load-bearing goes near an edge.
+    """
+    from . import roofline
+
+    ops = _load(REPO / "results" / "ops_tesla-t4_fp16.json")
+    a = roofline.analyse(profile, e2e, ops)
+    if not a or not graphs:
+        return None
+
+    kernel = a["gemv_ms_per_decode_step"]
+    eager = 1e3 / graphs["eager"]["median"]
+    graphed = 1e3 / graphs["graphed"]["median"]
+
+    fig = plt.figure(figsize=(16, 8))
+    fig.patch.set_facecolor("white")
+    ax = fig.add_axes([0.06, 0.10, 0.88, 0.52])
+
+    other_gpu = graphed - kernel          # other GPU work, present in both bars
+    idle = eager - graphed                # what capture actually removes
+    ax.barh([1, 0], [kernel, kernel], color=BLUE, height=0.42)
+    ax.barh([1, 0], [other_gpu, other_gpu], left=[kernel, kernel],
+            color="#7ba7f0", height=0.42)
+    ax.barh([1, 0], [idle, 0.0], left=[kernel + other_gpu] * 2,
+            color="#dfe3e8", height=0.42)
+    ax.set_yticks([1, 0])
+    ax.set_yticklabels(["before", "after"], fontsize=17, color=INK)
+    ax.set_xlim(0, eager * 1.16)
+    ax.set_ylim(-0.55, 1.62)
+    ax.set_xlabel("milliseconds to generate one word", fontsize=14, color=MUTED)
+    ax.tick_params(axis="x", labelsize=13)
+    ax.grid(axis="y", visible=False)
+    for spine in ("top", "right", "left"):
+        ax.spines[spine].set_visible(False)
+
+    ax.text(eager + 0.5, 1, f"{eager:.1f} ms", va="center", fontsize=20, color=INK)
+    ax.text(graphed + 0.5, 0, f"{graphed:.1f} ms", va="center", fontsize=20,
+            color=BLUE, fontweight="bold")
+    ax.text((kernel + other_gpu) / 2, 1, "GPU working", va="center", ha="center",
+            fontsize=14, color="white", fontweight="bold")
+    ax.text(kernel + other_gpu + idle / 2, 1, "GPU idle, waiting on the CPU",
+            va="center", ha="center", fontsize=13, color="#5b6572")
+    ax.text((kernel + other_gpu) / 2, 0, "GPU working", va="center", ha="center",
+            fontsize=14, color="white", fontweight="bold")
+
+    fig.text(0.06, 0.88, "The GPU was idle 54% of the time.",
+             fontsize=34, color=INK, fontweight="bold", ha="left")
+    fig.text(0.06, 0.79, "No faster kernel fixes that.",
+             fontsize=34, color=BLUE, fontweight="bold", ha="left")
+    fig.text(0.06, 0.70,
+             "Qwen2.5-1.5B on a Tesla T4  \u00b7  1.72x from replaying the "
+             "instructions instead of reissuing them",
+             fontsize=15, color=MUTED, ha="left")
+
+    path = OUT / "cover.svg"
+    _save(fig, path)
+    plt.close(fig)
+    return path
+
+
 def main() -> None:
     try:
         plt = _style()
@@ -238,6 +310,7 @@ def main() -> None:
     graphs = _load(results / "graphs_qwen2.5-1.5b_tesla-t4.json")
 
     made = [
+        chart_cover(plt, profile, e2e, graphs),
         chart_where_the_time_goes(plt, profile, e2e, graphs),
         chart_fusion_crossover(plt, ops_runs),
         chart_launch_floor(plt, ops_runs),
