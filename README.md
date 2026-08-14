@@ -248,14 +248,6 @@ is close to meaningless on the other, so it is measured rather than assumed.
 For decode, `hag.graphs.GraphedDecoder` replays a captured CUDA graph and is
 worth considerably more than either kernel.
 
-## The write-up
-
-[**The Fastest Code I Wrote Last Week Was the Code I Didn't Write**](docs/ARTICLE.md)
-is the narrative version: what was built, what regressed, and the two
-optimisations that were cancelled by arithmetic before anyone wrote them. It
-assumes no GPU background and is the best starting point if you want the story
-rather than the tables.
-
 ## Interactive explorer
 
 **[rahu378.github.io/hardware-aware-gateway](https://rahu378.github.io/hardware-aware-gateway/)**
